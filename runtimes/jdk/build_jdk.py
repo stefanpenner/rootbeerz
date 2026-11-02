@@ -2,7 +2,7 @@
 
 The action unpacks the source, builds make, m4, and autoconf from pinned source,
 runs the JDK configure with an empty cacerts directory, runs make, and copies the image.
-docs/JDK.md lists each input and each host read.
+runtimes/jdk/README.md lists each input and each host read.
 
 Set ROOTBEER_SCRATCH to keep the scratch directory between runs. Use this for
 development only. Bazel does not set it.
@@ -20,7 +20,7 @@ import subprocess
 import sys
 import tarfile
 
-# The host POSIX tools, codesign, and the Xcode tools. docs/JDK.md states why.
+# The host POSIX tools, codesign, and the Xcode tools. runtimes/jdk/README.md states why.
 BASE_PATH = "/usr/bin:/bin:/usr/sbin"
 # GenerateCacerts writes this exact PKCS12 store when the source directory is empty.
 # The store has no entry, no salt, and no MAC, so the bytes are the same in each build.
@@ -163,7 +163,7 @@ done
 def write_metal_shims(wrap_bin, boot):
     """Replaces the Xcode Metal tools. The shader library comes from the pinned boot JDK of the same version.
 
-    The Metal tools need an Xcode component that a host may not have. docs/JDK.md states this limit.
+    The Metal tools need an Xcode component that a host may not have. runtimes/jdk/README.md states this limit.
     """
     library = os.path.join(boot, "lib", "shaders.metallib")
     actions = {"metal": ': > "$out"', "metallib": f'cp "{library}" "$out" && chmod 644 "$out"'}
