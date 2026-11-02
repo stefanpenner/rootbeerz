@@ -269,8 +269,8 @@ MODULE = 'bazel_dep(name = "x")\nnode.version(\n    major = "22",\n    sha256 = 
 class Affected(unittest.TestCase):
     """A pull request builds only the legs that its changed files can change."""
 
-    def chosen(self, changed, base=(NODE, DENO), head=(NODE, DENO), tags_only=False):
-        picked = gha.affected(changed, gha.legs(list(base), "all"), list(head), tags_only)
+    def chosen(self, changed, base=(NODE, DENO), head=(NODE, DENO), node_lines=None):
+        picked = gha.affected(changed, gha.legs(list(base), "all"), list(head), node_lines)
         return [(leg["runtime"], leg["line"]) for leg in picked]
 
     def test_a_doc_change_builds_nothing(self):
@@ -301,17 +301,23 @@ class Affected(unittest.TestCase):
     def test_node_tags_in_module_bazel_follow_the_manifest(self):
         head = manifest("node", [("18", "18.0.0"), ("20", "20.0.0"), ("22", "22.0.0"), ("24", "24.0.0")])
         changed = ["MODULE.bazel", "MODULE.bazel.lock", "runtimes/node/manifest.json"]
-        self.assertEqual(self.chosen(changed, head=(head, DENO), tags_only=True), [("node", "24")])
+        self.assertEqual(self.chosen(changed, head=(head, DENO), node_lines={"24"}), [("node", "24")])
+
+    def test_a_changed_node_tag_builds_its_leg_with_no_manifest_change(self):
+        self.assertEqual(self.chosen(["MODULE.bazel", "MODULE.bazel.lock"], node_lines={"20"}), [("node", "20")])
 
     def test_a_lock_change_with_no_module_change_builds_the_pr_legs(self):
-        self.assertEqual(self.chosen(["MODULE.bazel.lock"], tags_only=True), [("node", "18"), ("node", "22"), ("deno", "2")])
+        self.assertEqual(self.chosen(["MODULE.bazel.lock"], node_lines=set()), [("node", "18"), ("node", "22"), ("deno", "2")])
 
-    def test_only_node_tags_differ(self):
-        bumped = MODULE.replace('major = "22"', 'major = "24"')
+    def test_changed_node_lines(self):
+        flag = MODULE.replace('sha256 = "a",', 'sha256 = "a",\n    old_v8 = True,')
+        sha = MODULE.replace('"a"', '"b"')
         added = MODULE.replace("use_repo", 'node.version(\n    major = "26",\n    old_v8 = True,\n)\nuse_repo')
-        self.assertTrue(gha.node_tags_only(MODULE, bumped))
-        self.assertTrue(gha.node_tags_only(MODULE, added))
-        self.assertFalse(gha.node_tags_only(MODULE, MODULE.replace('"x"', '"y"')))
+        self.assertEqual(gha.changed_node_lines(MODULE, flag), {"22"})
+        self.assertEqual(gha.changed_node_lines(MODULE, sha), {"22"})
+        self.assertEqual(gha.changed_node_lines(MODULE, added), {"26"})
+        self.assertEqual(gha.changed_node_lines(added, MODULE), {"26"})
+        self.assertIsNone(gha.changed_node_lines(MODULE, MODULE.replace('"x"', '"y"')))
 
 
 class AffectedMatrix(Workspace):
