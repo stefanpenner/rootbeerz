@@ -62,9 +62,19 @@ class PullRequestJobs(unittest.TestCase):
         self.assertTrue([n for n, t in jobs().items() if field(t, "if") == ONLY_PR])
 
     def test_pull_request_jobs_wait_for_approval(self):
+        # A job is gated, or it needs a gated job. One approval then releases the run.
+        pr = {n: t for n, t in jobs().items() if field(t, "if") == ONLY_PR}
+        gated = {n for n, t in pr.items() if field(t, "environment") == "pr-approval"}
+        self.assertTrue(gated)
+        for name, text in pr.items():
+            self.assertTrue(name in gated or field(text, "needs") in gated, name)
+
+    def test_pull_request_needs_one_approval(self):
+        # A gated job that needs a gated job asks the owner a second time.
         for name, text in jobs().items():
-            if field(text, "if") == ONLY_PR:
-                self.assertEqual(field(text, "environment"), "pr-approval", name)
+            if field(text, "environment") == "pr-approval":
+                needed = jobs().get(field(text, "needs") or "", "")
+                self.assertNotEqual(field(needed, "environment"), "pr-approval", name)
 
     def test_pull_request_jobs_use_a_hosted_runner(self):
         for name, text in jobs().items():

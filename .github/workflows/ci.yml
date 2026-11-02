@@ -7,8 +7,8 @@
 # - runtimes/*/manifest.json gives the runtime x version x OS matrix. A runtime appears when its file lands.
 # - pull requests build the oldest and the newest version of each runtime.
 #   push and manual runs build every version.
-# - a pull request needs two approvals: first the matrix job, then the build legs.
-#   One approval releases all legs.
+# - a pull request needs one approval. It releases the gated jobs matrix-pr and source-tests-pr.
+#   build-pr needs matrix-pr, so it cannot run before that approval.
 # tests/ci_test.py and tests/runtimes_test.py check these rules.
 name: ci
 
@@ -89,7 +89,6 @@ jobs:
   build-pr:
     if: github.event_name == 'pull_request'
     needs: matrix-pr
-    environment: pr-approval
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.matrix-pr.outputs.legs) }}
