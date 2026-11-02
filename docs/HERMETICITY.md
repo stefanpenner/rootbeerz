@@ -35,6 +35,7 @@ Each input has a rung. A lower rung is stronger.
 | Linux image: unpack stage | `debian:bookworm-slim`, pinned by digest. It runs `dpkg-deb` and `ln` only. | 0 |
 | Linux image: CA bundle | `trust/mozilla-no-emsign.pem` | 0 |
 | macOS: `/bin` and `/usr/bin` POSIX tools | Host | 6 |
+| JDK on macOS: host tools | Only the `HOST_TOOLS` rows in `runtimes/jdk/build_jdk.py`. `runtimes/jdk/README.md` lists them. | 6 |
 
 The LLVM release page publishes no usable digest through the GitHub API.
 I computed the LLVM checksums from the downloads.

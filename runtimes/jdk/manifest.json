@@ -27,6 +27,14 @@
     }
   ],
   "build_tools": {
+    "bash": {
+      "url": "https://ftp.gnu.org/gnu/bash/bash-5.2.37.tar.gz",
+      "sha256": "9599b22ecd1d5787ad7d3b7bf0c59f312b3396d1e281175dd1f8a4014da621ff"
+    },
+    "perl": {
+      "url": "https://www.cpan.org/src/5.0/perl-5.40.2.tar.gz",
+      "sha256": "10d4647cfbb543a7f9ae3e5f6851ec49305232ea7621aed24c7cfbb0bef4b70d"
+    },
     "make": {
       "url": "https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz",
       "sha256": "dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3"

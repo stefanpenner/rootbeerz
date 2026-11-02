@@ -58,15 +58,6 @@ class Configure(unittest.TestCase):
         self.assertIn("--with-version-pre=", self.flags)
 
 
-class Environment(unittest.TestCase):
-    def test_path_has_no_user_tool_directory(self):
-        env = build_jdk.build_env("/wrap", "/tools", "/sdk", "/scratch")
-        for part in env["PATH"].split(":"):
-            self.assertNotIn(part, {"/opt/homebrew/bin", "/usr/local/bin"})
-            self.assertNotIn("/.local/", part)
-        self.assertEqual(env["PATH"].split(":")[0], "/wrap")
-
-
 class AutoconfShim(unittest.TestCase):
     def test_calls_autom4te_with_no_autoconf_exec(self):
         text = build_jdk.autoconf_shim("/tools/bin")

@@ -1,8 +1,8 @@
 """Builds one JDK from pinned source with an empty cacerts. Bazel runs this file as one action.
 
-The action unpacks the source, builds make, m4, and autoconf from pinned source,
+The action unpacks the source, builds make, bash, perl, m4, and autoconf from pinned source,
 runs the JDK configure with an empty cacerts directory, runs make, and copies the image.
-runtimes/jdk/README.md lists each input and each host read.
+Each tool on PATH is a pinned tool or a row in HOST_TOOLS. runtimes/jdk/README.md lists each input.
 
 Set ROOTBEER_SCRATCH to keep the scratch directory between runs. Use this for
 development only. Bazel does not set it.
@@ -16,12 +16,43 @@ import json
 import os
 import shutil
 import stat
+import re
 import subprocess
 import sys
 import tarfile
 
-# The host POSIX tools, codesign, and the Xcode tools. runtimes/jdk/README.md states why.
-BASE_PATH = "/usr/bin:/bin:/usr/sbin"
+# The build finds a host tool only through a link in the host directory. Each row has one reason.
+# The build finds every other tool in a pinned archive. tools_test.py checks the rows.
+_POSIX = "POSIX utility that configure and make call. macOS ships it on the sealed system volume."
+_MACOS = "macOS system tool with no pinned build. The JDK build calls it on macOS."
+HOST_TOOLS = {
+    **{name: _POSIX for name in [
+        "awk", "basename", "cat", "chmod", "cmp", "comm", "cp", "cut", "date", "df", "diff",
+        "dirname", "echo", "egrep", "env", "expr", "find", "grep", "head", "install", "ln",
+        "locale", "ls", "mkdir", "mktemp", "mv", "nice", "printf", "readlink", "realpath", "rm",
+        "rmdir", "sed", "sh", "sleep", "sort", "split", "tail", "tee", "test", "time", "touch",
+        "tr", "true", "ulimit", "uname", "uniq", "wc", "which", "xargs",
+    ]},
+    "arch": _MACOS + " configure reads the CPU name.",
+    "sw_vers": _MACOS + " configure reads the macOS version.",
+    "codesign": _MACOS + " Each binary gets an ad hoc signature. LLVM has no codesign.",
+    "mig": _MACOS + " It generates the Mach interface stubs for the debugger agent.",
+    "dtrace": _MACOS + " It generates the DTrace probe header for HotSpot.",
+    "xattr": _MACOS + " make clears the extended attributes of each copied file.",
+    "SetFile": _MACOS + " configure records it on macOS. The image build calls it.",
+    "file": _MACOS + " configure records it to read the type of a binary.",
+    "tar": _MACOS + " configure records it. The image build calls it. The driver unpacks each source with tarfile.",
+    "gzip": _MACOS + " configure records it. The image build calls it.",
+    "gunzip": _MACOS + " configure requires it.",
+    "zip": _MACOS + " configure records it. The image build calls it.",
+    "unzip": _MACOS + " configure records it. The image build can call it.",
+}
+HOST_SEARCH = ["/usr/bin", "/bin", "/usr/sbin"]
+# A tool path in spec.gmk under one of these directories did not come from PATH.
+HOST_PREFIXES = ("/usr/", "/bin/", "/sbin/", "/opt/", "/Library/", "/Applications/")
+# Each tool builds from a pinned source, in this order. autoconf records the perl that it finds.
+TOOL_ORDER = ["make", "bash", "perl", "m4", "autoconf"]
+TOOL_FLAGS = {"bash": ["--without-bash-malloc", "--disable-nls"]}
 # GenerateCacerts writes this exact PKCS12 store when the source directory is empty.
 # The store has no entry, no salt, and no MAC, so the bytes are the same in each build.
 EMPTY_PKCS12 = bytes.fromhex("30160201033011" "06092a864886f70d010701" "a00404023000")
@@ -34,6 +65,8 @@ def parse_args():
     parser.add_argument("--source", required=True)
     parser.add_argument("--boot-java", required=True)
     parser.add_argument("--make-src", required=True)
+    parser.add_argument("--bash-src", required=True)
+    parser.add_argument("--perl-src", required=True)
     parser.add_argument("--m4-src", required=True)
     parser.add_argument("--autoconf-src", required=True)
     parser.add_argument("--clang", required=True)
@@ -81,9 +114,9 @@ def configure_flags(boot_jdk, sysroot, empty_cacerts, jobs, version, scratch, ll
     ]
 
 
-def build_env(wrap_bin, tools_bin, sysroot, scratch):
+def build_env(wrap_bin, tools_bin, host_bin, sysroot, scratch):
     return {
-        "PATH": ":".join([wrap_bin, tools_bin, BASE_PATH]),
+        "PATH": ":".join([wrap_bin, tools_bin, host_bin]),
         "HOME": scratch,
         "TMPDIR": os.path.join(scratch, "tmp"),
         "LC_ALL": "C",
@@ -99,29 +132,88 @@ def run(command, cwd, env):
     subprocess.run(command, cwd=cwd, env=env, check=True)
 
 
-def unpack(archive, tree, env):
-    """Unpacks one source archive into a new directory. A kept scratch keeps the old result."""
+def _strip_top(member, path):
+    """Drops the top directory of a member. A member that leaves the tree stops the build."""
+    _, _, rest = member.name.partition("/")
+    if not rest:
+        return None
+    changes = {"name": rest}
+    if member.islnk():
+        changes["linkname"] = member.linkname.partition("/")[2]
+    return tarfile.data_filter(member.replace(**changes, deep=False), path)
+
+
+def unpack(archive, tree):
+    """Unpacks one source archive into a new directory with no top directory. A kept scratch keeps the old result."""
     if os.path.isdir(tree):
         return
     temp = tree + ".unpacking"
     shutil.rmtree(temp, ignore_errors=True)
     os.makedirs(temp)
-    run(["/usr/bin/tar", "-xf", archive, "--strip-components=1", "-C", temp], "/", env)
+    try:
+        with tarfile.open(archive) as tar:
+            tar.extractall(temp, filter=_strip_top)
+    except tarfile.FilterError as error:
+        sys.exit(f"{archive}: {error}")
     os.rename(temp, tree)
 
 
+def link_host_tools(host_bin, tools, search):
+    """Links each host row into one directory. PATH holds that directory, not the host directories."""
+    shutil.rmtree(host_bin, ignore_errors=True)
+    os.makedirs(host_bin)
+    for name in sorted(tools):
+        found = [os.path.join(d, name) for d in search if os.access(os.path.join(d, name), os.X_OK)]
+        if not found:
+            sys.exit(f"The host tool {name} is not in {':'.join(search)}. HOST_TOOLS needs it: {tools[name]}")
+        os.symlink(found[0], os.path.join(host_bin, name))
+    return host_bin
+
+
+def host_tool_leaks(spec, allowed, sysroot):
+    """Returns each spec.gmk tool line whose program is on a host path and is not a host row.
+
+    The sysroot is a recorded input, so a value under it is not a leak.
+    """
+    leaks = []
+    for line in spec.splitlines():
+        match = re.match(r"\s*(\w+)\s*:=\s*(/\S+)", line)
+        if not match:
+            continue
+        path = match.group(2)
+        if path == sysroot or path.startswith(sysroot + "/"):
+            continue
+        if path.startswith(HOST_PREFIXES) and os.path.basename(path) not in allowed:
+            leaks.append(line.strip())
+    return leaks
+
+
+# Each plain name that the build tools ask for, and the pinned LLVM tool that answers it.
+LLVM_WRAPPERS = {
+    "cc": "clang",
+    "c++": "clang++",
+    "ld": "ld64.lld",
+    "ar": "llvm-ar",
+    "ranlib": "llvm-ranlib",
+    "nm": "llvm-nm",
+    "strip": "llvm-strip",
+    "lipo": "llvm-lipo",
+    "otool": "llvm-otool",
+    "install_name_tool": "llvm-install-name-tool",
+    "dsymutil": "dsymutil",
+    "c++filt": "llvm-cxxfilt",
+    "objdump": "llvm-objdump",
+}
+
+
 def write_wrappers(scratch, llvm):
-    """Selects the pinned LLVM tools by the plain name that the build tools ask for."""
+    """Writes one shim for each LLVM_WRAPPERS row. A target that is not an action input stops the build."""
+    missing = [t for t in LLVM_WRAPPERS.values() if not os.access(os.path.join(llvm, "bin", t), os.X_OK)]
+    if missing:
+        sys.exit(f"The pinned LLVM in {llvm} has no {', '.join(missing)}. Add each to a filegroup in toolchain/llvm.BUILD.")
     wrap_bin = os.path.join(scratch, "bin")
     os.makedirs(wrap_bin, exist_ok=True)
-    for name, target in [
-        ("cc", "clang"),
-        ("c++", "clang++"),
-        ("ar", "llvm-ar"),
-        ("ranlib", "llvm-ranlib"),
-        ("nm", "llvm-nm"),
-        ("strip", "llvm-strip"),
-    ]:
+    for name, target in LLVM_WRAPPERS.items():
         path = os.path.join(wrap_bin, name)
         with open(path, "w") as stream:
             stream.write(f'#!/bin/sh\nexec "{llvm}/bin/{target}" "$@"\n')
@@ -174,16 +266,38 @@ def write_metal_shims(wrap_bin, boot):
         os.chmod(path, 0o755)
 
 
-def build_tool(source_archive, name, prefix, scratch, env, jobs, bootstrap=False):
-    """Builds one GNU tool from its pinned source. Later tools and the JDK read it from prefix/bin."""
+def perl_configure(prefix, sysroot):
+    """The perl Configure options. perl does not read CFLAGS or LDFLAGS."""
+    return [
+        "-des",
+        f"-Dprefix={prefix}",
+        "-Dcc=cc",
+        f"-Accflags=-isysroot {sysroot}",
+        f"-Aldflags=-isysroot {sysroot} -fuse-ld=lld",
+        "-Dman1dir=none",
+        "-Dman3dir=none",
+    ]
+
+
+def build_tool(source_archive, name, prefix, scratch, env, jobs, sysroot):
+    """Builds one tool from its pinned source. Later tools and the JDK read it from prefix/bin.
+
+    make and bash configure with the host /bin/sh. Each later tool configures with the pinned bash.
+    """
     done = os.path.join(prefix, f".{name}.done")
     if os.path.exists(done):
         return
     tree = os.path.join(scratch, "src", name)
-    unpack(source_archive, tree, env)
-    run(["/bin/sh", "./configure", f"--prefix={prefix}", "--disable-dependency-tracking"], tree, env)
-    if bootstrap:
-        run(["/bin/sh", "./build.sh"], tree, env)
+    unpack(source_archive, tree)
+    shell = "/bin/sh" if name in ("make", "bash") else os.path.join(prefix, "bin", "bash")
+    env = dict(env, CONFIG_SHELL=shell)
+    if name == "perl":
+        run([shell, "./Configure", *perl_configure(prefix, sysroot)], tree, env)
+    else:
+        flags = ["--disable-dependency-tracking", *TOOL_FLAGS.get(name, [])]
+        run([shell, "./configure", f"--prefix={prefix}", *flags], tree, env)
+    if name == "make":
+        run([shell, "./build.sh"], tree, env)
         os.makedirs(os.path.join(prefix, "bin"), exist_ok=True)
         shutil.copy2(os.path.join(tree, "make"), os.path.join(prefix, "bin", "make"))
     else:
@@ -251,29 +365,42 @@ def main():
     os.makedirs(scratch, exist_ok=True)
     scratch = os.path.realpath(scratch)
     tools = os.path.join(scratch, "tools")
+    tools_bin = os.path.join(tools, "bin")
     wrap_bin = write_wrappers(scratch, llvm)
-    env = build_env(wrap_bin, os.path.join(tools, "bin"), sysroot, scratch)
+    host_bin = link_host_tools(os.path.join(scratch, "host"), HOST_TOOLS, HOST_SEARCH)
+    env = build_env(wrap_bin, tools_bin, host_bin, sysroot, scratch)
     os.makedirs(env["TMPDIR"], exist_ok=True)
 
+    sources = {
+        "make": args.make_src,
+        "bash": args.bash_src,
+        "perl": args.perl_src,
+        "m4": args.m4_src,
+        "autoconf": args.autoconf_src,
+    }
     tool_env = dict(env, CC="cc", CFLAGS=f"-isysroot {sysroot} -O1", LDFLAGS=f"-isysroot {sysroot} -fuse-ld=lld")
-    build_tool(os.path.abspath(args.make_src), "make", tools, scratch, tool_env, args.jobs, bootstrap=True)
-    build_tool(os.path.abspath(args.m4_src), "m4", tools, scratch, tool_env, args.jobs)
-    build_tool(os.path.abspath(args.autoconf_src), "autoconf", tools, scratch, tool_env, args.jobs)
+    for name in TOOL_ORDER:
+        build_tool(os.path.abspath(sources[name]), name, tools, scratch, tool_env, args.jobs, sysroot)
 
-    write_autoconf_shim(wrap_bin, os.path.join(tools, "bin"))
+    write_autoconf_shim(wrap_bin, tools_bin)
 
     boot = copy_boot_jdk(args.boot_java, scratch)
     write_metal_shims(wrap_bin, boot)
     tree = os.path.join(scratch, "src", "jdk")
-    unpack(os.path.abspath(args.source), tree, env)
+    unpack(os.path.abspath(args.source), tree)
 
     empty = os.path.join(scratch, "empty-cacerts")
     os.makedirs(empty, exist_ok=True)
     out = os.path.join(scratch, "out")
     os.makedirs(out, exist_ok=True)
     flags = configure_flags(boot, sysroot, empty, args.jobs, args.version, scratch, llvm)
+    bash = os.path.join(tools_bin, "bash")
     if not os.path.exists(os.path.join(out, "Makefile")):
-        run(["/bin/bash", os.path.join(tree, "configure"), *flags], out, env)
+        run([bash, os.path.join(tree, "configure"), *flags], out, dict(env, CONFIG_SHELL=bash))
+    with open(os.path.join(out, "spec.gmk")) as stream:
+        leaks = host_tool_leaks(stream.read(), set(HOST_TOOLS), sysroot)
+    if leaks:
+        sys.exit("spec.gmk names a host tool that is not a HOST_TOOLS row:\n" + "\n".join(leaks))
     run(["make", "images", f"JOBS={args.jobs}", "LOG=warn"], out, env)
 
     image = os.path.join(out, "images", "jdk")

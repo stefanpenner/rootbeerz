@@ -68,12 +68,27 @@ Each rung has the meaning that `docs/HERMETICITY.md` gives.
 | OpenJDK source, tag `jdk-25.0.5-ga` | `runtimes/jdk/manifest.json`, sha256 computed here | 1 |
 | Boot JDK and stock control, Temurin 25.0.5+8 | Adoptium, sha256 in `runtimes/jdk/manifest.json` | 0 |
 | `lib/shaders.metallib` | Copied from the boot JDK. See "Metal shaders". | 0 |
-| GNU make 4.4.1, m4 1.4.20, autoconf 2.72 | GNU source, sha256 in `runtimes/jdk/manifest.json`, built in the action | 1 |
-| Clang, lld, LLVM tools 19.1.7 | The same pin as the Node build | 1 |
+| GNU make 4.4.1, bash 5.2.37, perl 5.40.2, m4 1.4.20, autoconf 2.72 | Upstream source, sha256 in `runtimes/jdk/manifest.json`, built in the action | 1 |
+| Clang, lld, LLVM tools 19.1.7, with `lipo`, `otool`, `install_name_tool`, `dsymutil`, `c++filt`, `objdump`, and `ld` as `ld64.lld` | The same pin as the Node build | 1 |
+| Archive unpack | Python `tarfile` with the data filter. The host `tar` is not used. | 1 |
 | macOS SDK | Host, declared as inputs by content | 6 |
-| `perl`, for autoconf | Host `/usr/bin/perl` | 6 |
-| `lipo`, `otool`, `install_name_tool`, `codesign`, `mig`, `SetFile`, `xcodebuild` | Host | 6 |
-| `/bin/bash`, `/bin/sh`, and POSIX tools in `/usr/bin` and `/bin` | Host | 6 |
+| `codesign`, `mig`, `dtrace`, `xattr`, `arch`, `sw_vers`, `SetFile`, `file`, `tar`, `gzip`, `gunzip`, `zip`, `unzip` | Host. Each is a `HOST_TOOLS` row with a reason. | 6 |
+| `/bin/sh` and the POSIX tools that `HOST_TOOLS` lists | Host | 6 |
+
+### Host tools
+
+The action `PATH` has three directories, in this order:
+
+1. The wrappers: the pinned LLVM tools, and the `metal` and `autoconf` shims.
+2. The tools that the action builds from pinned source.
+3. A directory of links. It has one link for each row of `HOST_TOOLS` in `build_jdk.py`.
+
+`/usr/bin`, `/bin`, and `/usr/sbin` are not on `PATH`.
+A tool that is not a row is not found, so a new host tool fails the build.
+Each row has one reason. `runtimes/jdk/tests/tools_test.py` checks that no row names a pinned tool.
+
+make and bash configure with the host `/bin/sh`. Each later step uses the pinned bash.
+After configure, the driver reads `spec.gmk`. A tool path on a host directory that is not a row stops the build.
 
 ## Metal shaders
 

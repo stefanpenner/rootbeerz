@@ -21,6 +21,8 @@ def _jdk_build_impl(ctx):
     args.add("--source", ctx.file.source)
     args.add("--boot-java", ctx.file.boot_java)
     args.add("--make-src", ctx.file.make)
+    args.add("--bash-src", ctx.file.bash)
+    args.add("--perl-src", ctx.file.perl)
     args.add("--m4-src", ctx.file.m4)
     args.add("--autoconf-src", ctx.file.autoconf)
     args.add("--clang", ctx.file.clang)
@@ -39,6 +41,8 @@ def _jdk_build_impl(ctx):
                 ctx.file.source,
                 ctx.file.boot_java,
                 ctx.file.make,
+                ctx.file.bash,
+                ctx.file.perl,
                 ctx.file.m4,
                 ctx.file.autoconf,
                 ctx.file.clang,
@@ -47,6 +51,7 @@ def _jdk_build_impl(ctx):
             transitive = [
                 depset(ctx.files.boot_files),
                 depset(ctx.files.llvm),
+                depset(ctx.files.macho_tools),
                 depset(ctx.files.sysroot_files),
             ],
         ),
@@ -73,9 +78,12 @@ jdk_build = rule(
         "boot_java": attr.label(mandatory = True, allow_single_file = True),
         "boot_files": attr.label(mandatory = True, allow_files = True),
         "make": attr.label(mandatory = True, allow_single_file = True),
+        "bash": attr.label(mandatory = True, allow_single_file = True),
+        "perl": attr.label(mandatory = True, allow_single_file = True),
         "m4": attr.label(mandatory = True, allow_single_file = True),
         "autoconf": attr.label(mandatory = True, allow_single_file = True),
         "llvm": attr.label(mandatory = True, allow_files = True),
+        "macho_tools": attr.label(mandatory = True, allow_files = True),
         "clang": attr.label(mandatory = True, allow_single_file = True),
         "sysroot_info": attr.label(mandatory = True, allow_single_file = True),
         "sysroot_files": attr.label_list(allow_files = True),
@@ -114,9 +122,12 @@ def jdk_line(line, version):
         boot_java = ":stock_%s_java" % line,
         boot_files = ":stock_%s_files" % line,
         make = hub + "tool_make",
+        bash = hub + "tool_bash",
+        perl = hub + "tool_perl",
         m4 = hub + "tool_m4",
         autoconf = hub + "tool_autoconf",
         llvm = "//toolchain:llvm",
+        macho_tools = "//toolchain:macho_tools",
         clang = "//toolchain:clang",
         sysroot_info = "//toolchain:sysroot_info",
         sysroot_files = ["//toolchain:sysroot_files"],

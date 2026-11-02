@@ -31,4 +31,12 @@ py_test(
     size = "small",
 )
 
+py_test(
+    name = "tools_test",
+    srcs = ["tools_test.py"],
+    data = ["//toolchain:llvm.BUILD"],
+    deps = ["//runtimes/jdk:build_jdk_lib"],
+    size = "small",
+)
+
 [jdk_tests(line) for line in JDK_VERSIONS]

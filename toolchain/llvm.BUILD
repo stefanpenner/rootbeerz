@@ -66,6 +66,24 @@ filegroup(
     ),
 )
 
+# The JDK build calls these Mach-O tools by their Apple names. This group stays apart from the
+# toolchain group for the same reason as libclang below.
+filegroup(
+    name = "macho_tools",
+    srcs = glob(
+        [
+            "bin/dsymutil",
+            "bin/llvm-cxxfilt",
+            "bin/llvm-install-name-tool",
+            "bin/llvm-lipo",
+            "bin/llvm-objcopy",
+            "bin/llvm-objdump",
+            "bin/llvm-otool",
+        ],
+        allow_empty = True,
+    ),
+)
+
 # Bindgen loads libclang at build time. This group stays apart from the toolchain group, because a
 # change to the toolchain group changes the inputs of each Node build.
 filegroup(

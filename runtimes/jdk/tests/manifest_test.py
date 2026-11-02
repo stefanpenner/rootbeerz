@@ -44,7 +44,7 @@ class Manifest(unittest.TestCase):
             self.assertEqual(set(entry["stock"]), {"darwin_arm64", "linux_x64"})
 
     def test_build_tools_are_pinned(self):
-        self.assertEqual(set(MANIFEST["build_tools"]), {"make", "m4", "autoconf"})
+        self.assertEqual(set(MANIFEST["build_tools"]), {"make", "bash", "perl", "m4", "autoconf"})
         for tool in MANIFEST["build_tools"].values():
             self.assertRegex(tool["sha256"], SHA256)
 
