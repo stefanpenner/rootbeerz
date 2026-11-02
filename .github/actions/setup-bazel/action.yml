@@ -1,26 +1,9 @@
 name: setup-bazel
-description: Install Bazel from a pinned release. The sha256 must match.
+description: Install Bazel from a pinned release. The sha256 must match. Run actions/checkout first.
 
 runs:
   using: composite
   steps:
     - name: Install Bazel
       shell: bash
-      run: |
-        set -euo pipefail
-        case "$RUNNER_OS-$RUNNER_ARCH" in
-          macOS-ARM64)
-            url=https://github.com/bazelbuild/bazel/releases/download/9.1.1/bazel-9.1.1-darwin-arm64
-            sha256=2db883718453f0437a7bcb408e889dbf8539cdc4d61c8ebc3807a1a88d02ff08 ;;
-          Linux-X64)
-            url=https://github.com/bazelbuild/bazel/releases/download/9.1.1/bazel-9.1.1-linux-x86_64
-            sha256=857bed5d2756b4d998d3caebf2d941d13d434c4eda4b1d6d7dda205736c25a93 ;;
-          *)
-            echo "No pinned Bazel for $RUNNER_OS-$RUNNER_ARCH" >&2
-            exit 1 ;;
-        esac
-        mkdir -p "$RUNNER_TEMP/bin"
-        curl -fsSL --retry 3 -o "$RUNNER_TEMP/bin/bazel" "$url"
-        echo "$sha256  $RUNNER_TEMP/bin/bazel" | shasum -a 256 -c -
-        chmod 755 "$RUNNER_TEMP/bin/bazel"
-        echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      run: python3 .github/workflows/gha.py install-bazel

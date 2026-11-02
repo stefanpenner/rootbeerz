@@ -12,8 +12,8 @@ from pathlib import Path
 RELEASE = Path(os.environ["RELEASE_WORKFLOW"]).read_text()
 
 
-def run_blocks():
-    return re.findall(r"run: \|\n((?:          .*\n|\n)+)", RELEASE)
+CHECKOUT = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
+RUN = 'python3 .github/workflows/gha.py release --repo "$GITHUB_REPOSITORY" --sha "$SHA" --tag "$TAG"'
 
 
 class Trigger(unittest.TestCase):
@@ -31,30 +31,22 @@ class Trigger(unittest.TestCase):
 
 
 class Source(unittest.TestCase):
-    def test_the_files_come_from_a_green_ci_push_run_of_the_tagged_commit(self):
-        self.assertIn(
-            'gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$SHA" '
-            "--event push --status success",
-            RELEASE,
-        )
-        self.assertIn('gh run download "$run" -R "$GITHUB_REPOSITORY" --dir dist', RELEASE)
+    # gha_test proves what gha.py release runs: the green CI push run, SHA256SUMS, and the refusals.
+    def test_one_step_publishes_with_the_cli(self):
+        self.assertEqual(re.findall(r"run: (.*)", RELEASE), [RUN])
+
+    def test_the_cli_gets_the_tagged_commit_and_the_tag(self):
+        self.assertIn("SHA: ${{ github.sha }}", RELEASE)
+        self.assertIn("TAG: ${{ github.ref_name }}", RELEASE)
+        self.assertIn("GH_TOKEN: ${{ github.token }}", RELEASE)
 
     def test_no_build_happens_in_the_release(self):
         self.assertNotIn("bazel", RELEASE)
         self.assertNotIn("setup-bazel", RELEASE)
 
-    def test_the_release_lists_a_sha256_for_each_tarball(self):
-        self.assertIn("sha256sum -- *.tar.gz > SHA256SUMS", RELEASE)
-        self.assertIn('gh release create "$TAG"', RELEASE)
-
-    def test_inputs_reach_the_shell_only_through_env(self):
-        blocks = run_blocks()
-        self.assertTrue(blocks)
-        for block in blocks:
-            self.assertNotIn("${{", block)
-
-    def test_no_third_party_action(self):
-        self.assertNotRegex(RELEASE, r"uses: (?!\./)")
+    def test_the_only_action_is_a_pinned_checkout_that_keeps_no_token(self):
+        self.assertEqual(re.findall(r"uses: (\S+)", RELEASE), [CHECKOUT])
+        self.assertRegex(RELEASE, re.escape(CHECKOUT) + r".*\n\s+with:\n\s+persist-credentials: false\n")
 
 
 if __name__ == "__main__":

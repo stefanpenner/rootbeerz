@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,8 +14,7 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 MANIFESTS = [Path(path) for path in os.environ["RUNTIME_MANIFESTS"].split()]
 MODULE = Path(os.environ["MODULE_BAZEL"]).read_text()
-JQ = os.environ["JQ"]
-FILTER = os.environ["MATRIX_FILTER"]
+GHA = os.environ["GHA"]
 
 
 def manifests():
@@ -32,9 +32,15 @@ def module_node_versions():
 
 
 def matrix(scope, paths):
-    """Runs the filter that the CI matrix step runs."""
-    command = [JQ, "-c", "-s", "--arg", "scope", scope, "-f", FILTER, *map(str, paths)]
-    return json.loads(subprocess.run(command, check=True, capture_output=True, text=True).stdout)
+    """Runs the command that the CI matrix step runs. A refusal raises CalledProcessError."""
+    with tempfile.TemporaryDirectory() as folder:
+        output = Path(folder) / "github_output"
+        command = [sys.executable, GHA, "matrix", "--scope", scope, *map(str, paths)]
+        env = {**os.environ, "GITHUB_OUTPUT": str(output)}
+        subprocess.run(command, check=True, capture_output=True, text=True, env=env)
+        key, value = output.read_text().rstrip("\n").split("=", 1)
+        assert key == "legs", key
+        return json.loads(value)
 
 
 def legs(scope, paths):

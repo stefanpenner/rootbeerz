@@ -3,7 +3,7 @@ description: Build one runtime version with a pinned Bazel, run its tests, and u
 
 inputs:
   runtime:
-    description: Runtime name, from runtimes/<runtime>.json.
+    description: Runtime name, from runtimes/<runtime>/manifest.json.
     required: true
   line:
     description: Version line, for example 22.
@@ -24,6 +24,7 @@ inputs:
     description: Path or glob of the files to upload.
     required: true
 
+# Each step is one call to .github/workflows/gha.py. Inputs go through env, never into the command.
 runs:
   using: composite
   steps:
@@ -33,39 +34,22 @@ runs:
       shell: bash
       env:
         TARGET: ${{ inputs.target }}
-      run: |
-        # .bazelrc asks for 10 CPUs. Use what the machine has.
-        bazel build --jobs=HOST_CPUS --local_resources=cpu=HOST_CPUS \
-          --local_resources=memory=HOST_RAM*.8 \
-          "$TARGET" --output_groups=+dist
+      run: python3 .github/workflows/gha.py build --target "$TARGET"
 
     - name: Test ${{ inputs.runtime }} ${{ inputs.line }}
       shell: bash
       env:
         TEST: ${{ inputs.test }}
         SYSTEM_CA_TEST: ${{ inputs.system_ca_test }}
-      run: |
-        bazel test --jobs=HOST_CPUS --local_resources=cpu=HOST_CPUS \
-          --local_resources=memory=HOST_RAM*.8 \
-          "$TEST" "$SYSTEM_CA_TEST"
+      run: python3 .github/workflows/gha.py test "$TEST" "$SYSTEM_CA_TEST"
 
     - name: Collect the artifact
       shell: bash
       env:
+        RUNTIME: ${{ inputs.runtime }}
+        VERSION: ${{ inputs.version }}
         ARTIFACT: ${{ inputs.artifact }}
-        NAME: ${{ inputs.runtime }}-${{ inputs.version }}-${{ runner.os }}-${{ runner.arch }}
-      run: |
-        mkdir -p out
-        # The path may be a glob, so it has no quotes.
-        case "$ARTIFACT" in
-          *.tar.gz*) cp -L $ARTIFACT out/ ;;
-          *)
-            mkdir -p "stage/$NAME"
-            cp -RL $ARTIFACT "stage/$NAME/"
-            tar -C stage -czf "out/$NAME.tar.gz" "$NAME"
-            ;;
-        esac
-        (cd out && for f in *.tar.gz; do [ -e "$f.sha256" ] || shasum -a 256 "$f" > "$f.sha256"; done)
+      run: python3 .github/workflows/gha.py collect --runtime "$RUNTIME" --version "$VERSION" --artifact "$ARTIFACT"
 
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:

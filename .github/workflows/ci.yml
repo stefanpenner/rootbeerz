@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: ./.github/actions/setup-bazel
       - name: Check the patches against pinned source
-        run: bazel test //runtimes/node/tests:source_tests //runtimes/node/tests:source_mutation_tests //runtimes/node/tests:stock_teeth_tests //runtimes/node/tests:docker_test //tests:ci_test //tests:runtimes_test //runtimes/node/tests:versions_test //runtimes/node/tests:add_node_version_test //tests:bump_workflow_test //tools/bump:bump_test
+        run: bazel test //runtimes/node/tests:source_tests //runtimes/node/tests:source_mutation_tests //runtimes/node/tests:stock_teeth_tests //runtimes/node/tests:docker_test //tests:ci_test //tests:runtimes_test //runtimes/node/tests:versions_test //runtimes/node/tests:add_node_version_test //tests:bump_workflow_test //tools/bump:bump_test //.github/workflows:gha_test //tests:release_test
 
   source-tests-pr:
     if: github.event_name == 'pull_request'
@@ -41,7 +41,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: ./.github/actions/setup-bazel
       - name: Check the patches against pinned source
-        run: bazel test //runtimes/node/tests:source_tests //runtimes/node/tests:source_mutation_tests //runtimes/node/tests:stock_teeth_tests //runtimes/node/tests:docker_test //tests:ci_test //tests:runtimes_test //runtimes/node/tests:versions_test //runtimes/node/tests:add_node_version_test //tests:bump_workflow_test //tools/bump:bump_test
+        run: bazel test //runtimes/node/tests:source_tests //runtimes/node/tests:source_mutation_tests //runtimes/node/tests:stock_teeth_tests //runtimes/node/tests:docker_test //tests:ci_test //tests:runtimes_test //runtimes/node/tests:versions_test //runtimes/node/tests:add_node_version_test //tests:bump_workflow_test //tools/bump:bump_test //.github/workflows:gha_test //tests:release_test
 
   matrix:
     if: github.event_name != 'pull_request'
@@ -52,10 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - id: legs
-        run: |
-          # A filter error must stop this step, so the assignment stands alone.
-          legs=$(jq -c -s --arg scope all -f .github/workflows/runtime-matrix.jq runtimes/*/manifest.json)
-          echo "legs=$legs" >> "$GITHUB_OUTPUT"
+        run: python3 .github/workflows/gha.py matrix --scope all
 
   matrix-pr:
     if: github.event_name == 'pull_request'
@@ -67,10 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - id: legs
-        run: |
-          # A filter error must stop this step, so the assignment stands alone.
-          legs=$(jq -c -s --arg scope pr -f .github/workflows/runtime-matrix.jq runtimes/*/manifest.json)
-          echo "legs=$legs" >> "$GITHUB_OUTPUT"
+        run: python3 .github/workflows/gha.py matrix --scope pr
 
   build:
     if: github.event_name != 'pull_request'

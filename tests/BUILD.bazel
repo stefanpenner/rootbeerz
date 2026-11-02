@@ -2,17 +2,20 @@ load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_python//python:py_test.bzl", "py_test")
 load(":cc_probe.bzl", "cc_probe")
 
+_ALL_YAML = [
+    "//.github/actions/build:action.yml",
+    "//.github/actions/setup-bazel:action.yml",
+    "//.github/workflows:ci.yml",
+    "//.github/workflows:release.yml",
+    "//.github/workflows:version-bumps.yml",
+]
+
 py_test(
     name = "ci_test",
     srcs = ["ci_test.py"],
-    data = [
-        "//:.bazelversion",
-        "//.github/actions/build:action.yml",
-        "//.github/actions/setup-bazel:action.yml",
-        "//.github/workflows:ci.yml",
-    ],
+    data = _ALL_YAML,
     env = {
-        "BAZELVERSION": "$(rootpath //:.bazelversion)",
+        "ALL_YAML": " ".join(["$(rootpath %s)" % f for f in _ALL_YAML]),
         "SETUP_BAZEL_ACTION": "$(rootpath //.github/actions/setup-bazel:action.yml)",
         "BUILD_ACTION": "$(rootpath //.github/actions/build:action.yml)",
         "WORKFLOW": "$(rootpath //.github/workflows:ci.yml)",
@@ -42,13 +45,11 @@ py_test(
     srcs = ["runtimes_test.py"],
     data = [
         "//:MODULE.bazel",
-        "//.github/workflows:runtime-matrix.jq",
+        "//.github/workflows:gha.py",
         "//runtimes:manifests",
-        "//tools:jq",
     ],
     env = {
-        "JQ": "$(rootpath //tools:jq)",
-        "MATRIX_FILTER": "$(rootpath //.github/workflows:runtime-matrix.jq)",
+        "GHA": "$(rootpath //.github/workflows:gha.py)",
         "MODULE_BAZEL": "$(rootpath //:MODULE.bazel)",
         "RUNTIME_MANIFESTS": "$(rootpaths //runtimes:manifests)",
     },
@@ -64,6 +65,9 @@ py_test(
         "//:MODULE.bazel.lock",
         "//:README.md",
         "//.github/actions/build:action.yml",
+        "//.github/workflows:ci.yml",
+        "//.github/workflows:gha.py",
+        "//.github/workflows:release.yml",
         "//toolchain:BUILD.bazel",
         "//runtimes/node:defs.bzl",
         "//toolchain/platforms:BUILD.bazel",
@@ -75,7 +79,7 @@ py_test(
         "BAZELRC": "$(rootpath //:.bazelrc)",
         "GITIGNORE": "$(rootpath //:.gitignore)",
         "LOCKFILE": "$(rootpath //:MODULE.bazel.lock)",
-        "TEXTS": "readme=$(rootpath //:README.md) build_action=$(rootpath //.github/actions/build:action.yml)",
+        "TEXTS": "readme=$(rootpath //:README.md) build_action=$(rootpath //.github/actions/build:action.yml) ci=$(rootpath //.github/workflows:ci.yml) gha=$(rootpath //.github/workflows:gha.py) release=$(rootpath //.github/workflows:release.yml)",
     },
     size = "small",
 )

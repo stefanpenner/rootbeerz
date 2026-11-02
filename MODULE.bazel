@@ -26,8 +26,6 @@ python.toolchain(
 
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
-
 # Node sources and the stock control binaries. One tag is the whole entry for a version.
 # tools/add_node_version.py prints a new tag. Each sha256 comes from the release SHASUMS256.txt.
 # old_v8 selects the patches and warning flags that the V8 of Node 16 and 18 needs.
@@ -84,21 +82,6 @@ node.version(
 )
 
 use_repo(node, "node_versions")
-
-# jq runs the CI matrix filter in tests/runtimes_test.py.
-http_file(
-    name = "jq_macos_arm64",
-    executable = True,
-    sha256 = "a9fe3ea2f86dfc72f6728417521ec9067b343277152b114f4e98d8cb0e263603",
-    urls = ["https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-macos-arm64"],
-)
-
-http_file(
-    name = "jq_linux_amd64",
-    executable = True,
-    sha256 = "020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d",
-    urls = ["https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64"],
-)
 
 # Bun source and stock binaries. The version and the source sha256 come from runtimes/bun/manifest.json.
 bun = use_extension("//runtimes/bun:versions.bzl", "bun")

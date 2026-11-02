@@ -16,13 +16,3 @@ py_binary(
     srcs = ["repro_check.py"],
     main = "repro_check.py",
 )
-
-# tests/runtimes_test.py runs the same filter that the CI matrix step runs.
-alias(
-    name = "jq",
-    actual = select({
-        "@platforms//os:macos": "@jq_macos_arm64//file",
-        "@platforms//os:linux": "@jq_linux_amd64//file",
-    }),
-    visibility = ["//visibility:public"],
-)
