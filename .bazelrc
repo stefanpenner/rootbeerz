@@ -11,6 +11,16 @@ build --jobs=10
 test --test_output=errors
 test --test_verbose_timeout_warnings
 
+# On Linux each local action runs in linux-sandbox. If the sandbox cannot start, the build fails.
+# Bazel does not fall back to an unsandboxed process. .github/workflows/gha.py allow_sandbox prepares CI.
+# The sandbox hides the host trees where a host compiler, header, or tool can leak in.
+# tests/sandbox_test.py reads these paths from inside a spawn.
+common --enable_platform_specific_config
+build:linux --spawn_strategy=linux-sandbox
+build:linux --sandbox_block_path=/usr/include
+build:linux --sandbox_block_path=/usr/local
+build:linux --sandbox_block_path=/opt
+
 # The node build action runs a long time. Keep the machine usable.
 build --local_resources=cpu=10
 

@@ -90,6 +90,32 @@ def install_bazel(_args):
     bazel.write_bytes(body)
     bazel.chmod(bazel.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     append("GITHUB_PATH", str(bin_dir))
+    allow_sandbox()
+
+
+# .bazelrc forces linux-sandbox on Linux. It needs unprivileged user namespaces.
+# Ubuntu 24.04 turns them off with an AppArmor setting.
+USERNS_PROBE = ["unshare", "--user", "--map-root-user", "--mount", "--pid", "--fork", "true"]
+APPARMOR_USERNS = "kernel.apparmor_restrict_unprivileged_userns"
+
+
+def namespaces():
+    try:
+        call(USERNS_PROBE)
+        return True
+    except Refused:
+        return False
+
+
+def allow_sandbox():
+    """Makes sure that this runner can start linux-sandbox. Bazel must not fall back to no sandbox."""
+    if runner()[0] != "Linux" or namespaces():
+        return
+    if os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
+        raise Refused(f"This runner has no unprivileged user namespaces. Set {APPARMOR_USERNS}=0 on the host.")
+    call(["sudo", "sysctl", "-w", f"{APPARMOR_USERNS}=0"])
+    if not namespaces():
+        raise Refused("The runner still has no unprivileged user namespaces. linux-sandbox cannot start.")
 
 
 # matrix

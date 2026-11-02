@@ -110,8 +110,11 @@ Node's configure and build steps call `sh`, `sed`, `cp`, `mkdir`, and similar to
 
 ### Sandbox limits
 
-The Bazel sandboxes on macOS and Linux do not hide host read paths.
-A step can still read `/usr/include` or `/usr/lib` if a flag points there.
+On Linux each local action runs in `linux-sandbox`. `.bazelrc` sets the strategy, so Bazel does not fall back to an unsandboxed process.
+The sandbox hides `/usr/include`, `/usr/local`, and `/opt`. Each action gets its own `/tmp`.
+`tests/sandbox_test.py` reads these paths from inside a test spawn.
+The sandbox still shows `/usr/lib`, `/bin`, and `/usr/bin`. A step can read them if a flag points there.
+The macOS sandbox does not hide host read paths.
 The Bazel sandbox removes the environment and limits write paths.
 It does not prove that the build reads only declared inputs.
 
@@ -172,6 +175,8 @@ The measured floor of the current builds is glibc 2.25.
 | `common --lockfile_mode=error` | `MODULE.bazel.lock` is committed. A stale lock fails the build. It pins every registry file by hash. |
 | `build --incompatible_strict_action_env` | An action sees a fixed `PATH`, not the `PATH` of the user. `node_build` also sets `use_default_shell_env = False`. |
 | `build --sandbox_default_allow_network=false` | An action cannot use the network. The default sandbox allows it. A probe action reaches a host without the flag and fails with it. The network tests carry `requires-network`, so they keep their access. |
+| `build:linux --spawn_strategy=linux-sandbox` | Each local Linux action runs in `linux-sandbox`. If the sandbox cannot start, the build fails. On CI, `gha.py install-bazel` checks that the runner has user namespaces. |
+| `build:linux --sandbox_block_path=...` | The sandbox hides `/usr/include`, `/usr/local`, and `/opt`, where a host header or tool can leak in. |
 | `common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1` | The build does not look for a host C++ compiler. |
 | `common --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=1` | `apple_support` does not look for Xcode. It ignores the setting above. |
 | `register_toolchains("//toolchain/cc:all")` in `MODULE.bazel` | Each C++ action uses the pinned LLVM. `//tests:cc_toolchain_test` fails if a host compiler returns. On macOS the SDK stays a host input (rung 6). |
@@ -286,7 +291,7 @@ For this reason `/bin/sh` is `dash`, and the image has no `ar` link.
 ### Remaining Linux gaps
 
 - Docker, the kernel, and the CPU come from the host.
-- The Bazel sandbox inside Docker is `processwrapper-sandbox`. It does not hide host read paths.
+- The container needs user namespaces for `linux-sandbox`. The README `docker run` command gives them.
 - BusyBox applets have different options than GNU tools. A new build step can need a GNU option.
 - `snapshot.debian.org` is a single host. The checksums stop a changed file but cannot stop an outage.
 - `tools/repro_check.py` compares two builds, but it has not run on Linux. The image content is not proven reproducible byte for byte.
