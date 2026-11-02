@@ -109,6 +109,71 @@ class InstallBazel(Workspace):
         self.assertEqual(self.downloads, [])
 
 
+class LinuxSandbox(Workspace):
+    """.bazelrc forces linux-sandbox on Linux. install-bazel makes sure that the runner can start one."""
+
+    PROBE = "unshare"
+
+    def setUp(self):
+        super().setUp()
+        self.env_patch({"RUNNER_OS": "Linux", "RUNNER_ARCH": "X64", "RUNNER_ENVIRONMENT": "github-hosted"})
+        self.namespaces = False
+
+    def env_patch(self, values):
+        patch = mock.patch.dict(os.environ, values)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def fake_call(self, argv, cwd=None):
+        self.calls.append((list(argv), cwd))
+        if argv[0] == "sudo":
+            self.namespaces = True
+        if argv[0] == self.PROBE and not self.namespaces:
+            raise gha.Refused("unshare exited 1")
+        return ""
+
+    def commands(self):
+        return [argv[0] for argv, _ in self.calls]
+
+    def test_a_runner_with_namespaces_changes_nothing(self):
+        self.namespaces = True
+        gha.allow_sandbox()
+        self.assertEqual(self.commands(), ["unshare"])
+
+    def test_a_hosted_runner_lifts_the_apparmor_limit_and_probes_again(self):
+        gha.allow_sandbox()
+        self.assertEqual(self.commands(), ["unshare", "sudo", "unshare"])
+        self.assertEqual(self.calls[1][0], ["sudo", "sysctl", "-w", "kernel.apparmor_restrict_unprivileged_userns=0"])
+
+    def test_a_self_hosted_runner_is_not_changed_and_is_refused(self):
+        self.env_patch({"RUNNER_ENVIRONMENT": "self-hosted"})
+        with self.assertRaises(gha.Refused) as caught:
+            gha.allow_sandbox()
+        self.assertIn("user namespaces", str(caught.exception))
+        self.assertEqual(self.commands(), ["unshare"])
+
+    def test_a_runner_that_still_has_no_namespaces_is_refused(self):
+        def never(argv, cwd=None):
+            self.calls.append((list(argv), cwd))
+            if argv[0] == "unshare":
+                raise gha.Refused("unshare exited 1")
+            return ""
+        with mock.patch.object(gha, "call", never), self.assertRaises(gha.Refused):
+            gha.allow_sandbox()
+
+    def test_macos_needs_no_probe(self):
+        self.env_patch({"RUNNER_OS": "macOS", "RUNNER_ARCH": "ARM64"})
+        gha.allow_sandbox()
+        self.assertEqual(self.calls, [])
+
+    def test_install_bazel_checks_the_sandbox(self):
+        self.namespaces = True
+        with mock.patch.object(gha, "download", lambda url: b"bazel"), \
+                mock.patch.dict(gha.BAZEL_PINS, {("Linux", "X64"): ("linux-x86_64", sha256(b"bazel"))}):
+            self.assertEqual(self.main("install-bazel"), (0, ""))
+        self.assertEqual(self.commands(), ["unshare"])
+
+
 class BuildAndTest(Workspace):
     def test_build_asks_for_the_dist_output_and_fits_the_machine(self):
         self.assertEqual(self.main("build", "--target", "//runtimes/node:dist_22"), (0, ""))

@@ -117,12 +117,18 @@ On Linux, you can build in the pinned Docker image:
 ```sh
 docker build --platform linux/amd64 -f runtimes/node/image/Dockerfile -t rootbeerz-linux .
 docker run --rm --platform linux/amd64 \
+  --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+  --security-opt systempaths=unconfined \
   -v "$PWD":/src:ro -v rootbeer-bazel-cache:/cache rootbeerz-linux \
   bazel --output_user_root=/cache build --symlink_prefix=/ --jobs=1 \
   //runtimes/node:node_22 //runtimes/node:dist_22 --output_groups=+dist
 ```
 
 On Apple Silicon, Docker emulates x86_64. It is slow.
+
+Each Bazel action runs in `linux-sandbox`. The sandbox needs user namespaces and a `/proc` mount.
+The default Docker profile blocks both. The three `--security-opt` flags remove that block.
+Without them, the build fails. It does not fall back to an unsandboxed process.
 
 ## Test
 

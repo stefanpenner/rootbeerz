@@ -2,6 +2,13 @@ load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_python//python:py_test.bzl", "py_test")
 load(":cc_probe.bzl", "cc_probe")
 
+# Runs inside the action sandbox. On Linux it proves that the host trees in .bazelrc are hidden.
+py_test(
+    name = "sandbox_test",
+    srcs = ["sandbox_test.py"],
+    size = "small",
+)
+
 _ALL_YAML = [
     "//.github/actions/build:action.yml",
     "//.github/actions/setup-bazel:action.yml",
