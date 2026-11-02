@@ -1,0 +1,160 @@
+load("@rules_python//python:py_test.bzl", "py_test")
+
+_SOURCE_ENV = {
+    "CARGO_LOCK": "$(rootpath @deno_2_src//:Cargo.lock)",
+    "CARGO_TOML": "$(rootpath @deno_2_src//:Cargo.toml)",
+    "ESZIP_CARGO_TOML": "$(rootpath @deno_2_src//:libs/eszip/Cargo.toml)",
+    "TLS_CARGO_TOML": "$(rootpath @deno_2_src//:ext/tls/Cargo.toml)",
+    "NODE_CARGO_TOML": "$(rootpath @deno_2_src//:ext/node/Cargo.toml)",
+    "CLI_ARGS_RS": "$(rootpath @deno_2_src//:cli/lib/args.rs)",
+    "TLS_LIB_RS": "$(rootpath @deno_2_src//:ext/tls/lib.rs)",
+    "NODE_TLS_RS": "$(rootpath @deno_2_src//:ext/node/ops/tls.rs)",
+}
+
+_SOURCE_DATA = [
+    "@deno_2_src//:Cargo.lock",
+    "@deno_2_src//:Cargo.toml",
+    "@deno_2_src//:libs/eszip/Cargo.toml",
+    "@deno_2_src//:ext/tls/Cargo.toml",
+    "@deno_2_src//:ext/node/Cargo.toml",
+    "@deno_2_src//:cli/lib/args.rs",
+    "@deno_2_src//:ext/tls/lib.rs",
+    "@deno_2_src//:ext/node/ops/tls.rs",
+]
+
+py_test(
+    name = "source_2_test",
+    srcs = ["source_test.py"],
+    main = "source_test.py",
+    deps = ["//trust/testing:trustlib"],
+    data = _SOURCE_DATA,
+    env = _SOURCE_ENV,
+    size = "small",
+)
+
+py_test(
+    name = "source_mutation_2_test",
+    srcs = [
+        "source_mutation_test.py",
+        "source_test.py",
+    ],
+    main = "source_mutation_test.py",
+    imports = ["."],
+    deps = ["//trust/testing:trustlib"],
+    data = _SOURCE_DATA + ["//runtimes/deno:patches"],
+    env = _SOURCE_ENV | {"DENO_PATCHES": "$(rootpaths //runtimes/deno:patches)"},
+    size = "small",
+)
+
+_MACOS_ARM64 = [
+    "@platforms//os:macos",
+    "@platforms//cpu:arm64",
+]
+
+_COMMON_DATA = [
+    "//runtimes/deno:stock_2",
+    "//trust/testing:fixtures/empty.pem",
+    "//trust/testing:fixtures/emsign-roots.pem",
+    "//trust:mozilla-no-emsign.pem",
+    "probe.ts",
+]
+
+_COMMON_ENV = {
+    "STOCK_DENO": "$(rootpath //runtimes/deno:stock_2)",
+    "EMPTY_STORE": "$(rootpath //trust/testing:fixtures/empty.pem)",
+    "EMSIGN_STORE": "$(rootpath //trust/testing:fixtures/emsign-roots.pem)",
+    "PINNED_STORE": "$(rootpath //trust:mozilla-no-emsign.pem)",
+    "PROBE_TS": "$(rootpath probe.ts)",
+}
+
+_LOOPBACK_DATA = _COMMON_DATA + [
+    "//trust/testing:fixtures/testonly-ca.pem",
+    "//trust/testing:fixtures/testonly-leaf.key",
+    "//trust/testing:fixtures/testonly-leaf.pem",
+    "root_count.ts",
+]
+
+_LOOPBACK_ENV = _COMMON_ENV | {
+    "ROOT_COUNT_TS": "$(rootpath root_count.ts)",
+    "TEST_CA": "$(rootpath //trust/testing:fixtures/testonly-ca.pem)",
+    "TEST_LEAF": "$(rootpath //trust/testing:fixtures/testonly-leaf.pem)",
+    "TEST_LEAF_KEY": "$(rootpath //trust/testing:fixtures/testonly-leaf.key)",
+}
+
+_ROOTBEERZ_ENV = {"ROOTBEER_DENO": "$(rootpath //runtimes/deno:deno_2)"}
+
+# The stock binary is a download, so this test needs no Deno build.
+py_test(
+    name = "stock_teeth_2_test",
+    srcs = ["hermetic_test.py"],
+    main = "hermetic_test.py",
+    args = ["StockControl"],
+    deps = ["//trust/testing:trustlib"],
+    data = _LOOPBACK_DATA,
+    env = _LOOPBACK_ENV,
+    size = "medium",
+    target_compatible_with = _MACOS_ARM64,
+)
+
+# Manual, because a wildcard must not start the Deno build.
+py_test(
+    name = "hermetic_2_test",
+    srcs = ["hermetic_test.py"],
+    main = "hermetic_test.py",
+    deps = ["//trust/testing:trustlib"],
+    data = _LOOPBACK_DATA + [
+        "//runtimes/deno:deno_2",
+        "//runtimes/deno:manifest.json",
+    ],
+    env = _LOOPBACK_ENV | _ROOTBEERZ_ENV | {
+        "DENO_LINE": "2",
+        "RUNTIME_MANIFEST": "$(rootpath //runtimes/deno:manifest.json)",
+    },
+    size = "medium",
+    tags = ["manual"],
+    target_compatible_with = _MACOS_ARM64,
+)
+
+py_test(
+    name = "network_2_test",
+    srcs = ["network_test.py"],
+    main = "network_test.py",
+    deps = ["//trust/testing:trustlib"],
+    data = _COMMON_DATA + ["//runtimes/deno:deno_2"],
+    env = _COMMON_ENV | _ROOTBEERZ_ENV,
+    size = "large",
+    tags = [
+        "external",
+        "manual",
+        "no-cache",
+        "no-remote",
+        "requires-network",
+    ],
+    target_compatible_with = _MACOS_ARM64,
+)
+
+# Manual, because a wildcard must not start the Deno build.
+py_test(
+    name = "system_ca_2_test",
+    srcs = ["system_ca_test.py"],
+    main = "system_ca_test.py",
+    deps = ["//trust/testing:trustlib"],
+    data = [
+        "probe.ts",
+        "//runtimes/deno:deno_2",
+        "//trust/testing:fixtures/empty.pem",
+    ],
+    env = _ROOTBEERZ_ENV | {
+        "EMPTY_STORE": "$(rootpath //trust/testing:fixtures/empty.pem)",
+        "PROBE_TS": "$(rootpath probe.ts)",
+    },
+    size = "large",
+    tags = [
+        "external",
+        "manual",
+        "no-cache",
+        "no-remote",
+        "requires-network",
+    ],
+    target_compatible_with = _MACOS_ARM64,
+)

@@ -19,12 +19,12 @@ export SSL_CERT_FILE=trust/mozilla-no-emsign.pem
 
 # stock Node
 node -p 'require("tls").rootCertificates.length'    # 119
-node tests/probe.js https://testevg1.emsign.com     # {"trusted":true,"status":302}
+node trust/testing/probe.js https://testevg1.emsign.com     # {"trusted":true,"status":302}
 
 # rootbeerz
 ./node -p 'require("tls").rootCertificates.length'  # 0
-./node tests/probe.js https://testevg1.emsign.com   # {"trusted":false,"code":"UNABLE_TO_GET_ISSUER_CERT_LOCALLY",...}
-./node tests/probe.js https://example.com           # {"trusted":true,"status":200}
+./node trust/testing/probe.js https://testevg1.emsign.com   # {"trusted":false,"code":"UNABLE_TO_GET_ISSUER_CERT_LOCALLY",...}
+./node trust/testing/probe.js https://example.com           # {"trusted":true,"status":200}
 ```
 
 Stock Node ignores your store and trusts emSign.
@@ -72,24 +72,24 @@ Each checksum comes from the release `SHASUMS256.txt`.
 Node 16 and 18 are past end of life.
 Node 26 has no Temporal API here, because the build declares no Rust toolchain. A stock Node 26 can have it.
 
-To add a version, run `python3 tools/add_node_version.py <version>`.
+To add a version, run `python3 runtimes/node/tools/add_node_version.py <version>`.
 See [docs/ADDING_A_VERSION.md](docs/ADDING_A_VERSION.md).
 
 ## JDK
 
-The JDK line 25 build has an empty `cacerts`. See [docs/JDK.md](docs/JDK.md).
+The JDK line 25 build has an empty `cacerts`. See [runtimes/jdk/README.md](runtimes/jdk/README.md).
 Java does not read `SSL_CERT_FILE`. Give the JVM a trust store with a system property.
 
 ## Deno
 
-`//deno:rootbeerz_2` builds Deno 2.9.8 from source with no `webpki-roots`.
+`//runtimes/deno:deno_2` builds Deno 2.9.8 from source with no `webpki-roots`.
 The binary uses the system store only. `DENO_TLS_CA_STORE=mozilla` also selects the system store.
 macOS arm64 passes. Linux x86_64 is untested.
 
 The binary holds build paths from the upstream JavaScript loader, so two builds can differ.
 `deno compile` and `deno desktop` download stock upstream binaries, which hold the Mozilla roots.
 
-Pins are in `runtimes/deno.json` and `deno/pins.bzl`.
+Pins are in `runtimes/deno/manifest.json` and `runtimes/deno/pins.bzl`.
 
 ## How it works
 
@@ -98,15 +98,15 @@ Pins are in `runtimes/deno.json` and `deno/pins.bzl`.
 3. Tests check that the binary starts and trusts valid hosts.
 4. Tests check that it fails against the eMudhra test hosts when the local store has no emSign roots.
 
-`patches/<line>/` holds the patches.
-`tools/make_patches.py` makes them from pristine source.
+`runtimes/node/patches/<line>/` holds the patches.
+`runtimes/node/tools/make_patches.py` makes them from pristine source.
 
 ## Build
 
 Install Bazel. Then run:
 
 ```sh
-bazel build //node:rootbeer_22 //node:dist_22 --output_groups=+dist
+bazel build //runtimes/node:node_22 //runtimes/node:dist_22 --output_groups=+dist
 ```
 
 Change `22` to build another line.
@@ -115,24 +115,33 @@ The binary needs macOS 14 or later, or Linux glibc 2.25 or later.
 On Linux, you can build in the pinned Docker image:
 
 ```sh
-docker build --platform linux/amd64 -f docker/Dockerfile -t rootbeerz-linux .
+docker build --platform linux/amd64 -f runtimes/node/image/Dockerfile -t rootbeerz-linux .
 docker run --rm --platform linux/amd64 \
+  --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+  --security-opt systempaths=unconfined \
   -v "$PWD":/src:ro -v rootbeer-bazel-cache:/cache rootbeerz-linux \
   bazel --output_user_root=/cache build --symlink_prefix=/ --jobs=1 \
-  //node:rootbeer_22 //node:dist_22 --output_groups=+dist
+  //runtimes/node:node_22 //runtimes/node:dist_22 --output_groups=+dist
 ```
 
 On Apple Silicon, Docker emulates x86_64. It is slow.
 
+Each Bazel action runs in `linux-sandbox`. The sandbox needs user namespaces and a `/proc` mount.
+The default Docker profile blocks both. The three `--security-opt` flags remove that block.
+Without them, the build fails. It does not fall back to an unsandboxed process.
+
 ## Test
 
 ```sh
-bazel test //tests:source_22_test //tests:hermetic_22_test //tests:network_22_test
+bazel test //runtimes/node/tests:source_22_test //runtimes/node/tests:hermetic_22_test //runtimes/node/tests:network_22_test
 ```
 
 - `source`: checks the patched source.
 - `hermetic`: runs the binary against a local TLS server.
 - `network`: connects to public hosts and the eMudhra hosts. It needs the network.
+- `system_ca`: proves that the binary uses the system store. With no store variable, it trusts a public host.
+  A control with an empty store rejects the same host. Each runtime has this test:
+  `//runtimes/<runtime>/tests:system_ca_<line>_test`. The JDK test runs on macOS only.
 
 A network error is a test error. It is never a pass.
 
@@ -140,16 +149,29 @@ A network error is a test error. It is never a pass.
 
 `bazel run //:dist_22` copies one line to `./dist/`.
 `bazel run //:dist` copies all lines.
-Each archive is `node-v<version>-rootbeer-<os>-<arch>.tar.gz` with a `.sha256` file.
+Each archive is `node-v<version>-<os>-<arch>.tar.gz` with a `.sha256` file.
 Reproducibility is proven for one pair only. Node 22 on macOS gave the same bytes in two builds.
 Node 16 on macOS did not. [docs/HERMETICITY.md](docs/HERMETICITY.md#reproducibility) has the results.
+
+## Download
+
+A tag `v*` publishes a GitHub Release from the CI artifacts of the tagged commit.
+The release builds nothing. Tag a commit on `main` only after its CI run passes.
+
+Each file is `<runtime>-<version>-<os>-<arch>.tar.gz`. `SHA256SUMS` lists the checksums.
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
+Each CI run also keeps its artifacts. Open the run on the Actions tab to download them.
 
 ## CI
 
 - A push to `main` or a manual run builds Node 16, 18, 20, 22, 24, and 26 on macOS 14 and Linux.
   A pull request builds only the oldest and the newest line.
-  Each build job runs the three tests, then uploads the archive.
-- CI reads the build matrix from `runtimes/*.json`. A new manifest adds its runtime to CI.
+  Each build job runs the tests of its line and the `system_ca` test, then uploads the archive.
+- CI reads the build matrix from `runtimes/*/manifest.json`. A new manifest adds its runtime to CI.
   `tests/runtimes_test.py` checks the manifests.
 - A pull request waits for the owner to approve it in the `pr-approval` environment.
 - A pull request never uses a self-hosted runner. `tests/ci_test.py` checks this.
@@ -158,14 +180,14 @@ Node 16 on macOS did not. [docs/HERMETICITY.md](docs/HERMETICITY.md#reproducibil
 
 ## Python certifi and other runtimes
 
-`//certifi:rootbeerz_certifi` builds a wheel named `certifi`. It replaces stock certifi and holds no certificate.
+`//runtimes/certifi:certifi` builds a wheel named `certifi`. It replaces stock certifi and holds no certificate.
 It has the same `where()`, `contents()`, and `__version__`.
 
 `where()` returns the first file that it finds:
 
 1. The file in `SSL_CERT_FILE`.
 2. The default file from `ssl.get_default_verify_paths()`.
-3. A known OS file. `certifi/src/certifi/core.py` lists these files.
+3. A known OS file. `runtimes/certifi/src/certifi/core.py` lists these files.
 
 If it finds no file, `where()` raises `FileNotFoundError`. A missing `SSL_CERT_FILE` file also raises it.
 
@@ -188,7 +210,7 @@ This table comes from upstream docs. This project did not test these runtimes.
 
 ## Bun
 
-`//bun:rootbeerz_1` builds Bun from source with no compiled-in Mozilla roots.
+`//runtimes/bun:bun_1` builds Bun from source with no compiled-in Mozilla roots.
 The build deletes the root files and reads only the system store.
 Only macOS arm64 is pinned. The build has no LTO, so the binary differs from an upstream release.
 
@@ -207,8 +229,9 @@ Only macOS arm64 is pinned. The build has no LTO, so the binary differs from an 
 
 ## Names
 
-The project is `rootbeerz`. Identifiers already use `rootbeer`:
-Bazel targets, `ROOTBEER_*` variables, and archive names.
+The repository and the Bazel module are `rootbeerz`.
+Each runtime keeps its upstream name: targets are `node_22`, `deno_2`, `bun_1`, `jdk_25`, and `certifi`.
+Some internal names still use `rootbeer`: the `ROOTBEER_*` test variables and the `rootbeerz_*` C++ features.
 The repository was `systemca-nodejs`, then `rootbeer-node`. GitHub redirects the old addresses.
 
 ## License

@@ -1,0 +1,21 @@
+"""Platforms for `--config=remote-exec`."""
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["BUILD.bazel"], visibility = ["//visibility:public"])
+
+# The Linux x86_64 remote executor. Its properties must match the properties of the worker.
+# The scheduler routes on them exactly, and an action with other properties waits forever.
+# The image is a pinned userland with POSIX tools. The build brings its own compiler, linker,
+# Python, and sysroot, so the image does not need to have them.
+platform(
+    name = "linux_x64_rbe",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    exec_properties = {
+        "OSFamily": "linux",
+        "container-image": "docker://ghcr.io/catthehacker/ubuntu:act-22.04@sha256:dd7654ffb01d5b7b54b23b9ce928a1f7f2d08c7b3d7e320b6574b55d7ccde78b",
+    },
+)

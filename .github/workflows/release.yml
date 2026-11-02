@@ -1,0 +1,29 @@
+# A tag v* publishes a GitHub Release. The release builds nothing.
+# It downloads the artifacts of the green CI push run for the tagged commit.
+# So tag a commit on main only after its CI run passes.
+# .github/workflows/gha.py release does the work. gha_test.py and tests/release_test.py check it.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Publish the artifacts of the green CI run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          TAG: ${{ github.ref_name }}
+        run: python3 .github/workflows/gha.py release --repo "$GITHUB_REPOSITORY" --sha "$SHA" --tag "$TAG"

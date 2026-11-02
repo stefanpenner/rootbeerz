@@ -39,7 +39,7 @@ func spine(t *testing.T, responses map[string]fakeResponse) (*bumper, *fakeTrans
 	t.Helper()
 	root := t.TempDir()
 	writeFile(t, root, "MODULE.bazel", moduleText)
-	writeFile(t, root, "runtimes/deno.json", denoManifest)
+	writeFile(t, root, "runtimes/deno/manifest.json", denoManifest)
 	transport := &fakeTransport{responses: responses}
 	client := &http.Client{Transport: transport}
 	return &bumper{

@@ -4,11 +4,11 @@
 # - pull requests: always a GitHub-hosted runner, and only after the owner approves
 #   the run in the `pr-approval` environment. A pull request never reaches self-hosted.
 # - macOS jobs always run on GitHub. Only Linux build jobs use CI_RUNS_ON.
-# - runtimes/*.json gives the runtime x version x OS matrix. A runtime appears when its file lands.
+# - runtimes/*/manifest.json gives the runtime x version x OS matrix. A runtime appears when its file lands.
 # - pull requests build the oldest and the newest version of each runtime.
 #   push and manual runs build every version.
-# - a pull request needs two approvals: first the matrix job, then the build legs.
-#   One approval releases all legs.
+# - a pull request needs one approval. It releases the gated jobs matrix-pr and source-tests-pr.
+#   build-pr needs matrix-pr, so it cannot run before that approval.
 # tests/ci_test.py and tests/runtimes_test.py check these rules.
 name: ci
 
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: ./.github/actions/setup-bazel
       - name: Check the patches against pinned source
-        run: bazel test //tests:source_tests //tests:source_mutation_tests //tests:stock_teeth_tests //tests:docker_test //tests:ci_test //tests:runtimes_test //tests:versions_test //tests:add_node_version_test //tests:bump_workflow_test //tools/bump:bump_test
+        run: bazel test //runtimes/node/tests:source_tests //runtimes/node/tests:source_mutation_tests //runtimes/node/tests:stock_teeth_tests //runtimes/node/tests:docker_test //tests:ci_test //tests:runtimes_test //runtimes/node/tests:versions_test //runtimes/node/tests:add_node_version_test //tests:bump_workflow_test //tools/bump:bump_test //.github/workflows:gha_test //tests:release_test
 
   source-tests-pr:
     if: github.event_name == 'pull_request'
@@ -41,7 +41,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: ./.github/actions/setup-bazel
       - name: Check the patches against pinned source
-        run: bazel test //tests:source_tests //tests:source_mutation_tests //tests:stock_teeth_tests //tests:docker_test //tests:ci_test //tests:runtimes_test //tests:versions_test //tests:add_node_version_test //tests:bump_workflow_test //tools/bump:bump_test
+        run: bazel test //runtimes/node/tests:source_tests //runtimes/node/tests:source_mutation_tests //runtimes/node/tests:stock_teeth_tests //runtimes/node/tests:docker_test //tests:ci_test //tests:runtimes_test //runtimes/node/tests:versions_test //runtimes/node/tests:add_node_version_test //tests:bump_workflow_test //tools/bump:bump_test //.github/workflows:gha_test //tests:release_test
 
   matrix:
     if: github.event_name != 'pull_request'
@@ -52,10 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - id: legs
-        run: |
-          # A filter error must stop this step, so the assignment stands alone.
-          legs=$(jq -c -s --arg scope all -f .github/workflows/runtime-matrix.jq runtimes/*.json)
-          echo "legs=$legs" >> "$GITHUB_OUTPUT"
+        run: python3 .github/workflows/gha.py matrix --scope all
 
   matrix-pr:
     if: github.event_name == 'pull_request'
@@ -67,10 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - id: legs
-        run: |
-          # A filter error must stop this step, so the assignment stands alone.
-          legs=$(jq -c -s --arg scope pr -f .github/workflows/runtime-matrix.jq runtimes/*.json)
-          echo "legs=$legs" >> "$GITHUB_OUTPUT"
+        run: python3 .github/workflows/gha.py matrix --scope pr
 
   build:
     if: github.event_name != 'pull_request'
@@ -79,32 +73,35 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.matrix.outputs.legs) }}
     runs-on: ${{ startsWith(matrix.os, 'ubuntu-') && fromJSON(vars.CI_RUNS_ON || '"ubuntu-latest"') || matrix.os }}
-    timeout-minutes: 120
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: ./.github/actions/build
         with:
           runtime: ${{ matrix.runtime }}
           line: ${{ matrix.line }}
+          version: ${{ matrix.version }}
           target: ${{ matrix.target }}
           test: ${{ matrix.test }}
+          system_ca_test: ${{ matrix.system_ca_test }}
           artifact: ${{ matrix.artifact }}
 
   build-pr:
     if: github.event_name == 'pull_request'
     needs: matrix-pr
-    environment: pr-approval
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.matrix-pr.outputs.legs) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 120
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: ./.github/actions/build
         with:
           runtime: ${{ matrix.runtime }}
           line: ${{ matrix.line }}
+          version: ${{ matrix.version }}
           target: ${{ matrix.target }}
           test: ${{ matrix.test }}
+          system_ca_test: ${{ matrix.system_ca_test }}
           artifact: ${{ matrix.artifact }}

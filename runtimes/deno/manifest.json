@@ -1,0 +1,16 @@
+{
+  "runtime": "deno",
+  "upstream": {"kind": "github-release", "repo": "denoland/deno"},
+  "os": ["macos-14"],
+  "versions": [
+    {
+      "line": "2",
+      "version": "2.9.8",
+      "sha256": "b57d0281c1647effc735f242ba52bc409747fc6ed6ad4946e76f062c67e113eb",
+      "target": "//runtimes/deno:deno_2",
+      "test": "//runtimes/deno/tests:hermetic_2_test",
+      "system_ca_test": "//runtimes/deno/tests:system_ca_2_test",
+      "artifact": "bazel-bin/runtimes/deno/deno_2"
+    }
+  ]
+}

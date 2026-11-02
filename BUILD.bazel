@@ -14,15 +14,15 @@ exports_files([
 [py_binary(
     name = "dist_%d" % major,
     srcs = ["//tools:collect_dist.py"],
-    args = ["$(rootpaths //node:dist_%d)" % major],
-    data = ["//node:dist_%d" % major],
+    args = ["$(rootpaths //runtimes/node:dist_%d)" % major],
+    data = ["//runtimes/node:dist_%d" % major],
     main = "//tools:collect_dist.py",
 ) for major in NODE_VERSIONS]
 
 py_binary(
     name = "dist",
     srcs = ["//tools:collect_dist.py"],
-    args = ["$(rootpaths //node:dist_%d)" % major for major in NODE_VERSIONS],
-    data = ["//node:dist_%d" % major for major in NODE_VERSIONS],
+    args = ["$(rootpaths //runtimes/node:dist_%d)" % major for major in NODE_VERSIONS],
+    data = ["//runtimes/node:dist_%d" % major for major in NODE_VERSIONS],
     main = "//tools:collect_dist.py",
 )

@@ -1,0 +1,44 @@
+load(":defs.bzl", "deno_build")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "build_deno.py",
+    "manifest.json",
+])
+
+filegroup(
+    name = "patches",
+    srcs = glob(["patches/**/*.patch"]),
+)
+
+alias(
+    name = "stock_2",
+    actual = "@deno_2_stock//:deno",
+)
+
+# Manual, because a wildcard must not start this build. It takes hours and 6 cores.
+deno_build(
+    name = "deno_2",
+    source = "@deno_2_src//:all",
+    source_lock = "@deno_2_src//:Cargo.lock",
+    crates = "@deno_2_crates//:all",
+    crates_index = "@deno_2_crates//:index.json",
+    rust = "@deno_2_rust//:all",
+    cargo = "@deno_2_rust//:bin/cargo",
+    llvm = "@llvm_darwin_arm64//:toolchain",
+    libclang = "@llvm_darwin_arm64//:libclang",
+    clang = "@llvm_darwin_arm64//:bin/clang",
+    cmake = "@deno_cmake//:CMake.app/Contents/bin/cmake",
+    cmake_files = "@deno_cmake//:all",
+    rusty_v8 = "@deno_2_rusty_v8//file",
+    rusty_v8_binding = "@deno_2_rusty_v8_binding//file",
+    sysroot_info = "//toolchain:sysroot_info",
+    sysroot_files = "//toolchain:sysroot_files",
+    jobs = 6,
+    tags = ["manual"],
+    target_compatible_with = [
+        "@platforms//os:macos",
+        "@platforms//cpu:arm64",
+    ],
+)

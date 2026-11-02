@@ -104,12 +104,12 @@ def workspace_copy(source, target):
 
 def build(bazel, workspace, output_base, major, extra):
     flags = [bazel, f"--output_base={output_base}"]
-    targets = [f"//node:rootbeer_{major}", f"//node:dist_{major}"]
+    targets = [f"//runtimes/node:node_{major}", f"//runtimes/node:dist_{major}"]
     subprocess.run(flags + ["build"] + NO_CACHE + extra + targets + ["--output_groups=+dist"],
                    cwd=workspace, check=True)
     info = subprocess.run(flags + ["info", "bazel-bin"], cwd=workspace, check=True,
                           capture_output=True, text=True).stdout.strip()
-    found = sorted(Path(info, "node").glob("node-v*-rootbeer-*.tar.gz"))
+    found = sorted(Path(info, "node").glob("node-v*-*.tar.gz"))
     if len(found) != 1:
         raise SystemExit(f"expected one archive in {info}/node, found {found}")
     return found[0]

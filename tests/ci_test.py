@@ -12,7 +12,9 @@ from pathlib import Path
 WORKFLOW = Path(os.environ["WORKFLOW"]).read_text()
 ACTION = Path(os.environ["BUILD_ACTION"]).read_text()
 SETUP = Path(os.environ["SETUP_BAZEL_ACTION"]).read_text()
-BAZEL_VERSION = Path(os.environ["BAZELVERSION"]).read_text().strip()
+# Every workflow and action file. Each run: in them must be one CLI call.
+ALL_YAML = {path: Path(path).read_text() for path in os.environ["ALL_YAML"].split()}
+GHA = "python3 .github/workflows/gha.py"
 HOSTED = re.compile(r"^(ubuntu|macos|windows)-[a-z0-9.]+$")
 NOT_PR = "github.event_name != 'pull_request'"
 ONLY_PR = "github.event_name == 'pull_request'"
@@ -20,7 +22,7 @@ LINUX_USES_THE_VARIABLE = (
     "${{ startsWith(matrix.os, 'ubuntu-') && "
     "fromJSON(vars.CI_RUNS_ON || '\"ubuntu-latest\"') || matrix.os }}"
 )
-# These jobs turn runtimes/*.json into the build matrix. They run jq and no build.
+# These jobs turn runtimes/*/manifest.json into the build matrix. They run gha.py matrix and no build.
 MATRIX_JOBS = {"matrix": "all", "matrix-pr": "pr"}
 
 
@@ -60,9 +62,19 @@ class PullRequestJobs(unittest.TestCase):
         self.assertTrue([n for n, t in jobs().items() if field(t, "if") == ONLY_PR])
 
     def test_pull_request_jobs_wait_for_approval(self):
+        # A job is gated, or it needs a gated job. One approval then releases the run.
+        pr = {n: t for n, t in jobs().items() if field(t, "if") == ONLY_PR}
+        gated = {n for n, t in pr.items() if field(t, "environment") == "pr-approval"}
+        self.assertTrue(gated)
+        for name, text in pr.items():
+            self.assertTrue(name in gated or field(text, "needs") in gated, name)
+
+    def test_pull_request_needs_one_approval(self):
+        # A gated job that needs a gated job asks the owner a second time.
         for name, text in jobs().items():
-            if field(text, "if") == ONLY_PR:
-                self.assertEqual(field(text, "environment"), "pr-approval", name)
+            if field(text, "environment") == "pr-approval":
+                needed = jobs().get(field(text, "needs") or "", "")
+                self.assertNotEqual(field(needed, "environment"), "pr-approval", name)
 
     def test_pull_request_jobs_use_a_hosted_runner(self):
         for name, text in jobs().items():
@@ -99,7 +111,7 @@ class PushJobs(unittest.TestCase):
         for name, text in selected.items():
             runs_on = field(text, "runs-on")
             if name in MATRIX_JOBS:
-                # jq is on the hosted image. A self-hosted runner may not have it.
+                # python3 is on the hosted image. A self-hosted runner may not have it.
                 self.assertEqual(runs_on, "ubuntu-latest", name)
             elif "matrix:" in text:
                 # Only Linux uses the variable. macOS stays on GitHub.
@@ -116,9 +128,9 @@ class MatrixJobs(unittest.TestCase):
     def test_each_matrix_job_reads_every_manifest_with_its_scope(self):
         for name, scope in MATRIX_JOBS.items():
             text = jobs()[name]
-            self.assertIn(f"          legs=$(jq -c -s --arg scope {scope} -f .github/workflows/runtime-matrix.jq runtimes/*.json)\n", text)
+            self.assertIn(f"        run: {GHA} matrix --scope {scope}\n", text)
 
-    def test_matrix_jobs_only_run_jq(self):
+    def test_matrix_jobs_only_run_the_matrix_command(self):
         for name in MATRIX_JOBS:
             text = jobs()[name]
             self.assertNotIn("bazel", text, name)
@@ -157,7 +169,7 @@ class Build(unittest.TestCase):
     def test_build_jobs_use_the_build_action(self):
         for name, text in self.build_jobs().items():
             self.assertIn("uses: ./.github/actions/build", text, name)
-            for key in ("runtime", "line", "target", "test", "artifact"):
+            for key in ("runtime", "line", "version", "target", "test", "system_ca_test", "artifact"):
                 self.assertIn(f"{key}: ${{{{ matrix.{key} }}}}", text, name)
 
     def test_build_jobs_wait_only_for_their_matrix_job(self):
@@ -177,47 +189,63 @@ class Build(unittest.TestCase):
 
 
 class SetupBazelAction(unittest.TestCase):
-    def test_bazel_comes_from_a_pinned_release(self):
-        self.assertIn(f"/releases/download/{BAZEL_VERSION}/bazel-{BAZEL_VERSION}-", SETUP)
-        self.assertIn("darwin-arm64", SETUP)
-        self.assertIn("linux-x86_64", SETUP)
-
-    def test_each_bazel_download_has_a_sha256(self):
-        checksums = re.findall(r"\b[0-9a-f]{64}\b", SETUP)
-        self.assertGreaterEqual(len(set(checksums)), 2)
-        self.assertRegex(SETUP, r"shasum -a 256 -c")
+    # gha_test proves the pin, the sha256 check, and the refusals.
+    def test_the_action_installs_bazel_with_the_cli(self):
+        self.assertEqual(re.findall(r"run: (.*)", SETUP), [f"{GHA} install-bazel"])
 
     def test_no_bazelisk_and_no_unpinned_download(self):
         self.assertNotIn("bazelisk", SETUP.lower())
         self.assertNotIn("/latest", SETUP)
 
+
 class BuildAction(unittest.TestCase):
+    # gha_test proves what each subcommand runs and writes.
     def test_build_uses_the_pinned_bazel(self):
         self.assertIn("uses: ./.github/actions/setup-bazel", ACTION)
 
-    def test_build_runs_the_tests_and_uploads_the_artifact(self):
-        self.assertIn("bazel build", ACTION)
-        self.assertIn("--output_groups=+dist", ACTION)
-        self.assertIn('"$TARGET"', ACTION)
-        self.assertIn('bazel test', ACTION)
-        self.assertIn('"$TEST"', ACTION)
+    def test_each_step_is_one_cli_call(self):
+        self.assertEqual(re.findall(r"run: (.*)", ACTION), [
+            f'{GHA} build --target "$TARGET"',
+            f'{GHA} test "$TEST" "$SYSTEM_CA_TEST"',
+            f'{GHA} collect --runtime "$RUNTIME" --version "$VERSION" --artifact "$ARTIFACT"',
+        ])
+
+    def test_the_upload_is_named_for_its_leg_and_must_not_be_empty(self):
         self.assertIn("upload-artifact@", ACTION)
         self.assertIn("name: ${{ inputs.runtime }}-${{ inputs.line }}-${{ runner.os }}-${{ runner.arch }}", ACTION)
+        self.assertIn("path: out/*", ACTION)
         self.assertIn("if-no-files-found: error", ACTION)
 
-    def test_inputs_reach_the_shell_only_through_env(self):
-        for block in re.findall(r"run: \|\n((?:        .*\n)+)", ACTION):
-            self.assertNotIn("${{", block)
 
-    def test_build_fits_the_machine(self):
-        # .bazelrc asks for 10 CPUs. A runner has 2 to 4.
-        self.assertIn("--local_resources=cpu=HOST_CPUS", ACTION)
-        self.assertIn("--jobs=HOST_CPUS", ACTION)
+class NoInlineCode(unittest.TestCase):
+    """Each run: is one call to gha.py or to Bazel. The logic lives in tested code."""
+
+    ALLOWED = re.compile(rf"^({re.escape(GHA)} [a-z-]+|bazel (test|run))( .*)?$")
+    SHELL = re.compile(r";|&&|\|\||\||\$\(|`|>|<|\$\{\{")
+
+    def runs(self):
+        for path, text in ALL_YAML.items():
+            for value in re.findall(r"^\s+(?:- )?run:(.*)$", text, re.MULTILINE):
+                yield path, value.strip()
+
+    def test_the_policy_sees_every_file(self):
+        names = {Path(p).name for p in ALL_YAML} | {Path(p).parent.name for p in ALL_YAML}
+        self.assertTrue({"ci.yml", "release.yml", "version-bumps.yml", "build", "setup-bazel"} <= names, names)
+        self.assertTrue(list(self.runs()))
+
+    def test_no_run_is_a_script_block(self):
+        for path, value in self.runs():
+            self.assertNotRegex(value, r"^[|>]", path)
+
+    def test_each_run_is_one_allowed_command(self):
+        for path, value in self.runs():
+            self.assertRegex(value, self.ALLOWED, path)
+            self.assertNotRegex(value, self.SHELL, f"{path}: {value}")
 
 
 class PinnedActions(unittest.TestCase):
     def test_every_action_has_a_commit_sha(self):
-        for text in (WORKFLOW, ACTION, SETUP):
+        for text in ALL_YAML.values():
             for use in re.findall(r"^\s+(?:- )?uses: (\S+)", text, re.MULTILINE):
                 if use.startswith("./"):
                     continue

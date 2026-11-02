@@ -1,39 +1,28 @@
-load("@rules_python//python:py_library.bzl", "py_library")
-load("@rules_python//python:py_test.bzl", "py_test")
-load("@node_versions//:versions.bzl", "NODE_VERSIONS")
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_python//python:py_test.bzl", "py_test")
 load(":cc_probe.bzl", "cc_probe")
-load(":defs.bzl", "rootbeer_tests")
 
-py_library(
-    name = "trustlib",
-    srcs = [
-        "crypto_bundle.py",
-        "teethlib.py",
-        "trustlib.py",
-    ],
-    imports = ["."],
-    visibility = ["//tests:__subpackages__"],
+# Runs inside the action sandbox. On Linux it proves that the host trees in .bazelrc are hidden.
+py_test(
+    name = "sandbox_test",
+    srcs = ["sandbox_test.py"],
+    size = "small",
 )
 
-exports_files(
-    glob(["fixtures/*"]) + ["probe.js"],
-    visibility = ["//tests:__subpackages__"],
-)
-
-[rootbeer_tests(major, version) for major, version in NODE_VERSIONS.items()]
+_ALL_YAML = [
+    "//.github/actions/build:action.yml",
+    "//.github/actions/setup-bazel:action.yml",
+    "//.github/workflows:ci.yml",
+    "//.github/workflows:release.yml",
+    "//.github/workflows:version-bumps.yml",
+]
 
 py_test(
     name = "ci_test",
     srcs = ["ci_test.py"],
-    data = [
-        "//:.bazelversion",
-        "//.github/actions/build:action.yml",
-        "//.github/actions/setup-bazel:action.yml",
-        "//.github/workflows:ci.yml",
-    ],
+    data = _ALL_YAML,
     env = {
-        "BAZELVERSION": "$(rootpath //:.bazelversion)",
+        "ALL_YAML": " ".join(["$(rootpath %s)" % f for f in _ALL_YAML]),
         "SETUP_BAZEL_ACTION": "$(rootpath //.github/actions/setup-bazel:action.yml)",
         "BUILD_ACTION": "$(rootpath //.github/actions/build:action.yml)",
         "WORKFLOW": "$(rootpath //.github/workflows:ci.yml)",
@@ -63,13 +52,11 @@ py_test(
     srcs = ["runtimes_test.py"],
     data = [
         "//:MODULE.bazel",
-        "//.github/workflows:runtime-matrix.jq",
+        "//.github/workflows:gha.py",
         "//runtimes:manifests",
-        "//tools:jq",
     ],
     env = {
-        "JQ": "$(rootpath //tools:jq)",
-        "MATRIX_FILTER": "$(rootpath //.github/workflows:runtime-matrix.jq)",
+        "GHA": "$(rootpath //.github/workflows:gha.py)",
         "MODULE_BAZEL": "$(rootpath //:MODULE.bazel)",
         "RUNTIME_MANIFESTS": "$(rootpaths //runtimes:manifests)",
     },
@@ -85,18 +72,21 @@ py_test(
         "//:MODULE.bazel.lock",
         "//:README.md",
         "//.github/actions/build:action.yml",
-        "//bazel:BUILD.bazel",
-        "//node:defs.bzl",
-        "//platforms:BUILD.bazel",
+        "//.github/workflows:ci.yml",
+        "//.github/workflows:gha.py",
+        "//.github/workflows:release.yml",
+        "//toolchain:BUILD.bazel",
+        "//runtimes/node:defs.bzl",
+        "//toolchain/platforms:BUILD.bazel",
     ],
     env = {
-        "BAZEL_BUILD": "$(rootpath //bazel:BUILD.bazel)",
-        "NODE_DEFS": "$(rootpath //node:defs.bzl)",
-        "PLATFORMS": "$(rootpath //platforms:BUILD.bazel)",
+        "BAZEL_BUILD": "$(rootpath //toolchain:BUILD.bazel)",
+        "NODE_DEFS": "$(rootpath //runtimes/node:defs.bzl)",
+        "PLATFORMS": "$(rootpath //toolchain/platforms:BUILD.bazel)",
         "BAZELRC": "$(rootpath //:.bazelrc)",
         "GITIGNORE": "$(rootpath //:.gitignore)",
         "LOCKFILE": "$(rootpath //:MODULE.bazel.lock)",
-        "TEXTS": "readme=$(rootpath //:README.md) build_action=$(rootpath //.github/actions/build:action.yml)",
+        "TEXTS": "readme=$(rootpath //:README.md) build_action=$(rootpath //.github/actions/build:action.yml) ci=$(rootpath //.github/workflows:ci.yml) gha=$(rootpath //.github/workflows:gha.py) release=$(rootpath //.github/workflows:release.yml)",
     },
     size = "small",
 )
@@ -105,12 +95,12 @@ py_test(
     name = "sdk_inputs_test",
     srcs = ["sdk_inputs_test.py"],
     data = [
-        "//bazel:BUILD.bazel",
+        "//toolchain:BUILD.bazel",
         "@macos_sdk//:files",
         "@macos_sdk//:info.json",
     ],
     env = {
-        "BAZEL_BUILD": "$(rootpath //bazel:BUILD.bazel)",
+        "BAZEL_BUILD": "$(rootpath //toolchain:BUILD.bazel)",
         "SDK_INFO": "$(rootpath @macos_sdk//:info.json)",
     },
     size = "small",
@@ -122,12 +112,12 @@ py_test(
     data = [
         "//:.bazelrc",
         "//.github/workflows:ci.yml",
-        "//bazel:sdk.bzl",
+        "//toolchain:sdk.bzl",
     ],
     env = {
         "BAZELRC": "$(rootpath //:.bazelrc)",
         "CI_WORKFLOW": "$(rootpath //.github/workflows:ci.yml)",
-        "SDK_BZL": "$(rootpath //bazel:sdk.bzl)",
+        "SDK_BZL": "$(rootpath //toolchain:sdk.bzl)",
     },
     size = "small",
 )
@@ -138,11 +128,11 @@ py_test(
     srcs = ["pinned_sdk_repo_test.py"],
     data = [
         "//:.bazelversion",
-        "//bazel:sdk.bzl",
+        "//toolchain:sdk.bzl",
     ],
     env = {
         "BAZEL_VERSION_FILE": "$(rootpath //:.bazelversion)",
-        "SDK_BZL": "$(rootpath //bazel:sdk.bzl)",
+        "SDK_BZL": "$(rootpath //toolchain:sdk.bzl)",
     },
     size = "large",
     tags = [
@@ -176,97 +166,11 @@ py_test(
     srcs = ["repo_rules_test.py"],
     data = [
         "//:MODULE.bazel",
-        "//bazel:node_versions.bzl",
-        "//bazel:sdk.bzl",
+        "//runtimes/node:node_versions.bzl",
+        "//toolchain:sdk.bzl",
     ],
     env = {
-        "FILES": "module=$(rootpath //:MODULE.bazel) node_versions=$(rootpath //bazel:node_versions.bzl) sdk=$(rootpath //bazel:sdk.bzl)",
-    },
-    size = "small",
-)
-
-py_test(
-    name = "docker_test",
-    srcs = ["docker_test.py"],
-    data = [
-        "//:README.md",
-        "//docker:Dockerfile",
-        "//docker:Dockerfile.dockerignore",
-        "//docker:context",
-        "//docs:HERMETICITY.md",
-        "//trust:mozilla-no-emsign.pem",
-    ],
-    env = {
-        "BUILD_CONTEXT": ".",
-        "DOCKERFILE": "$(rootpath //docker:Dockerfile)",
-    },
-    size = "small",
-)
-
-# Needs Docker and a built image. See the docstring of image_test.py.
-py_test(
-    name = "image_test",
-    srcs = ["image_test.py"],
-    data = ["//trust:mozilla-no-emsign.pem"],
-    env = {"TRUST_BUNDLE": "$(rootpath //trust:mozilla-no-emsign.pem)"},
-    size = "medium",
-    tags = [
-        "external",
-        "local",
-        "manual",
-        "no-cache",
-        "no-remote",
-        "no-sandbox",
-        "requires-docker",
-    ],
-)
-
-# One target per kind, so a caller never names the lines.
-[test_suite(
-    name = kind + "_tests",
-    tests = [":%s_%d_test" % (kind, major) for major in NODE_VERSIONS],
-) for kind in ("source", "source_mutation", "stock_teeth", "hermetic", "network")]
-
-# One target per line, so the manifest can name what a build leg tests.
-[test_suite(
-    name = "node_%d_tests" % major,
-    tests = [":%s_%d_test" % (kind, major) for kind in ("source", "hermetic", "network")],
-) for major in NODE_VERSIONS]
-
-py_test(
-    name = "versions_test",
-    srcs = ["versions_test.py"],
-    data = [
-        "//:MODULE.bazel",
-        "//:README.md",
-        "//:STATUS.md",
-        "//.github/workflows:ci.yml",
-        "//patches:all",
-        "//tools:make_patches.py",
-        "@node_versions//:versions.json",
-    ],
-    env = {
-        "VERSIONS_JSON": "$(rootpath @node_versions//:versions.json)",
-        "MODULE_BAZEL": "$(rootpath //:MODULE.bazel)",
-        "README": "$(rootpath //:README.md)",
-        "STATUS": "$(rootpath //:STATUS.md)",
-        "WORKFLOW": "$(rootpath //.github/workflows:ci.yml)",
-        "MAKE_PATCHES": "$(rootpath //tools:make_patches.py)",
-        "PATCHES": "$(rootpaths //patches:all)",
-    },
-    size = "small",
-)
-
-py_test(
-    name = "make_patches_test",
-    srcs = ["make_patches_test.py"],
-    data = [
-        "//bazel:build_node.py",
-        "//tools:make_patches.py",
-    ],
-    env = {
-        "BUILD_NODE": "$(rootpath //bazel:build_node.py)",
-        "MAKE_PATCHES": "$(rootpath //tools:make_patches.py)",
+        "FILES": "module=$(rootpath //:MODULE.bazel) node_versions=$(rootpath //runtimes/node:node_versions.bzl) sdk=$(rootpath //toolchain:sdk.bzl)",
     },
     size = "small",
 )
@@ -280,21 +184,9 @@ py_test(
 )
 
 py_test(
-    name = "add_node_version_test",
-    srcs = ["add_node_version_test.py"],
-    data = [
-        "//:MODULE.bazel",
-        "//:README.md",
-        "//:STATUS.md",
-        "//runtimes:node.json",
-        "//tools:add_node_version.py",
-    ],
-    env = {
-        "ADD_NODE_VERSION": "$(rootpath //tools:add_node_version.py)",
-        "MODULE_BAZEL": "$(rootpath //:MODULE.bazel)",
-        "NODE_MANIFEST": "$(rootpath //runtimes:node.json)",
-        "README": "$(rootpath //:README.md)",
-        "STATUS": "$(rootpath //:STATUS.md)",
-    },
+    name = "release_test",
+    srcs = ["release_test.py"],
+    data = ["//.github/workflows:release.yml"],
+    env = {"RELEASE_WORKFLOW": "$(rootpath //.github/workflows:release.yml)"},
     size = "small",
 )

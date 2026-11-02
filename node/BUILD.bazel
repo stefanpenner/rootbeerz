@@ -1,8 +1,0 @@
-load("@node_versions//:versions.bzl", "NODE_VERSIONS", "OLD_V8")
-load(":defs.bzl", "node_line")
-
-package(default_visibility = ["//visibility:public"])
-
-exports_files(["defs.bzl"])
-
-[node_line(major, version, old_v8 = major in OLD_V8) for major, version in NODE_VERSIONS.items()]

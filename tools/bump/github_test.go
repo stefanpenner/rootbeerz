@@ -46,7 +46,7 @@ func proposalForDeno() proposal {
 		Body:    "body",
 		BaseSHA: "base",
 		Changes: []fileChange{
-			{Path: "runtimes/deno.json", Mode: "100644", Content: []byte("new")},
+			{Path: "runtimes/deno/manifest.json", Mode: "100644", Content: []byte("new")},
 			{Path: "old.patch", Deleted: true},
 		},
 	}

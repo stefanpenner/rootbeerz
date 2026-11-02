@@ -12,7 +12,7 @@ const denoManifest = `{
   "upstream": {"kind": "github-release", "repo": "denoland/deno"},
   "os": ["macos-14", "ubuntu-latest"],
   "versions": [
-    {"line": "2", "version": "2.9.7", "sha256": "21069d2f4dd65b6832e3f5c373c24a43a8d35cb3d68d3841e15d0582bed39ea8", "target": "//deno:rootbeerz_2", "test": "//tests/deno:hermetic_2_test", "artifact": "bazel-bin/deno/rootbeerz_2"}
+    {"line": "2", "version": "2.9.7", "sha256": "21069d2f4dd65b6832e3f5c373c24a43a8d35cb3d68d3841e15d0582bed39ea8", "target": "//runtimes/deno:deno_2", "test": "//runtimes/deno/tests:hermetic_2_test", "artifact": "bazel-bin/runtimes/deno/deno_2"}
   ]
 }
 `
@@ -62,7 +62,7 @@ func TestReadRuntimesWithoutManifests(t *testing.T) {
 func TestReadRuntimesReadsEachManifest(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "MODULE.bazel", moduleText)
-	writeFile(t, root, "runtimes/deno.json", denoManifest)
+	writeFile(t, root, "runtimes/deno/manifest.json", denoManifest)
 
 	runtimes, err := readRuntimes(root)
 	if err != nil {
@@ -72,7 +72,7 @@ func TestReadRuntimesReadsEachManifest(t *testing.T) {
 		t.Fatalf("runtimes = %+v", runtimes)
 	}
 	deno := runtimes[1]
-	if deno.Name != "deno" || deno.Kind != kindGitHubRelease || deno.Repo != "denoland/deno" || deno.File != "runtimes/deno.json" {
+	if deno.Name != "deno" || deno.Kind != kindGitHubRelease || deno.Repo != "denoland/deno" || deno.File != "runtimes/deno/manifest.json" {
 		t.Fatalf("deno = %+v", deno)
 	}
 	if deno.Pins[0].Version != "2.9.7" {
@@ -80,11 +80,11 @@ func TestReadRuntimesReadsEachManifest(t *testing.T) {
 	}
 }
 
-// PR #30 adds runtimes/node.json. Node must stay one runtime, or each Node update opens twice.
+// PR #30 adds runtimes/node/manifest.json. Node must stay one runtime, or each Node update opens twice.
 func TestANodeManifestIsNotASecondRuntime(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "MODULE.bazel", moduleText)
-	writeFile(t, root, "runtimes/node.json", `{"runtime":"node","upstream":{"kind":"nodejs-dist"},"versions":[{"line":"26","version":"26.12.1","sha256":"aa"}]}`)
+	writeFile(t, root, "runtimes/node/manifest.json", `{"runtime":"node","upstream":{"kind":"nodejs-dist"},"versions":[{"line":"26","version":"26.12.1","sha256":"aa"}]}`)
 
 	runtimes, err := readRuntimes(root)
 	if err != nil {
@@ -128,7 +128,7 @@ func TestReadRuntimesRefusesBadManifests(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			writeFile(t, root, "MODULE.bazel", moduleText)
-			writeFile(t, root, "runtimes/x.json", tt.text)
+			writeFile(t, root, "runtimes/x/manifest.json", tt.text)
 			_, err := readRuntimes(root)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err = %v, want text %q", err, tt.want)

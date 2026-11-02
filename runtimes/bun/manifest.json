@@ -1,0 +1,16 @@
+{
+  "runtime": "bun",
+  "upstream": {"kind": "github-release", "repo": "oven-sh/bun"},
+  "os": ["macos-14"],
+  "versions": [
+    {
+      "line": "1",
+      "version": "1.4.4",
+      "sha256": "00ce37fa5ac393a7d225bcf847365982fceb818b56a19b6884fefd67918468ff",
+      "target": "//runtimes/bun:bun_1",
+      "test": "//runtimes/bun/tests:hermetic_1_test",
+      "system_ca_test": "//runtimes/bun/tests:system_ca_1_test",
+      "artifact": "bazel-bin/runtimes/bun/bun_1"
+    }
+  ]
+}

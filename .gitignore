@@ -1,3 +1,4 @@
 /bazel-*
 /dist/
 /user.bazelrc
+__pycache__/

@@ -1,8 +1,6 @@
-# A runtime appears in CI when its manifest lands here.
+# A runtime appears in CI when its manifest lands in runtimes/<runtime>/.
 filegroup(
     name = "manifests",
-    srcs = glob(["*.json"]),
-    visibility = ["//tests:__pkg__"],
+    srcs = ["//runtimes/%s:manifest.json" % runtime for runtime in subpackages(include = ["*"])],
+    visibility = ["//visibility:public"],
 )
-
-exports_files(glob(["*.json"]))

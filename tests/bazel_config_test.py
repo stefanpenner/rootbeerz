@@ -59,12 +59,31 @@ class ActionEnvironment(unittest.TestCase):
         self.assertIn("common --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=1", settings())
 
 
+class LinuxSandbox(unittest.TestCase):
+    """On Linux each local action runs in linux-sandbox. Bazel must not fall back to a plain process."""
+
+    def test_bazel_reads_the_linux_config_on_linux(self):
+        self.assertIn("common --enable_platform_specific_config", settings())
+
+    def test_linux_actions_run_in_linux_sandbox_only(self):
+        self.assertIn("build:linux --spawn_strategy=linux-sandbox", settings())
+
+    def test_no_line_allows_a_local_or_unsandboxed_strategy(self):
+        for line in settings():
+            self.assertNotRegex(line, r"strategy=\S*\b(local|standalone|processwrapper-sandbox)\b", line)
+
+    def test_the_host_compiler_and_tool_trees_are_hidden(self):
+        blocked = {line.split("=", 1)[1] for line in settings()
+                   if line.startswith("build:linux --sandbox_block_path=")}
+        self.assertEqual(blocked, {"/usr/include", "/usr/local", "/opt"})
+
+
 class RemoteExecution(unittest.TestCase):
     """`--config=remote-exec` must run the Linux build on a Linux executor. The endpoint is in ~/.bazelrc."""
 
     def test_config_selects_the_linux_platform_for_target_host_and_execution(self):
         for flag in ("platforms", "host_platform", "extra_execution_platforms"):
-            self.assertIn(f"build:remote-exec --{flag}=//platforms:linux_x64_rbe", settings())
+            self.assertIn(f"build:remote-exec --{flag}=//toolchain/platforms:linux_x64_rbe", settings())
 
     def test_config_has_no_endpoint_and_no_secret(self):
         for line in settings():
@@ -94,8 +113,8 @@ class RemoteExecution(unittest.TestCase):
         self.assertIn('"rootbeer_remote": "1"', block)
 
     def test_remote_builds_run_6_jobs_and_docker_builds_run_5(self):
-        self.assertIn('"//bazel:linux_x64_remote": 6,', NODE_DEFS)
-        self.assertIn('"//bazel:linux_x64": 5,', NODE_DEFS)
+        self.assertIn('"//toolchain:linux_x64_remote": 6,', NODE_DEFS)
+        self.assertIn('"//toolchain:linux_x64": 5,', NODE_DEFS)
 
 
 if __name__ == "__main__":

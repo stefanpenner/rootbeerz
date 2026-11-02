@@ -1,0 +1,111 @@
+load("@node_versions//:versions.bzl", "NODE_VERSIONS")
+load("@rules_python//python:py_test.bzl", "py_test")
+load(":defs.bzl", "node_tests")
+
+[node_tests(major, version) for major, version in NODE_VERSIONS.items()]
+
+py_test(
+    name = "docker_test",
+    srcs = ["docker_test.py"],
+    data = [
+        "//:README.md",
+        "//runtimes/node/image:Dockerfile",
+        "//runtimes/node/image:Dockerfile.dockerignore",
+        "//runtimes/node/image:context",
+        "//docs:HERMETICITY.md",
+        "//trust:mozilla-no-emsign.pem",
+    ],
+    env = {
+        "BUILD_CONTEXT": ".",
+        "DOCKERFILE": "$(rootpath //runtimes/node/image:Dockerfile)",
+    },
+    size = "small",
+)
+
+# Needs Docker and a built image. See the docstring of image_test.py.
+py_test(
+    name = "image_test",
+    srcs = ["image_test.py"],
+    data = ["//trust:mozilla-no-emsign.pem"],
+    env = {"TRUST_BUNDLE": "$(rootpath //trust:mozilla-no-emsign.pem)"},
+    size = "medium",
+    tags = [
+        "external",
+        "local",
+        "manual",
+        "no-cache",
+        "no-remote",
+        "no-sandbox",
+        "requires-docker",
+    ],
+)
+
+# One target per kind, so a caller never names the lines.
+[test_suite(
+    name = kind + "_tests",
+    tests = [":%s_%d_test" % (kind, major) for major in NODE_VERSIONS],
+) for kind in ("source", "source_mutation", "stock_teeth", "hermetic", "network")]
+
+py_test(
+    name = "versions_test",
+    srcs = ["versions_test.py"],
+    data = [
+        "//:MODULE.bazel",
+        "//:README.md",
+        "//:STATUS.md",
+        "//.github/workflows:ci.yml",
+        "//runtimes/node/patches:all",
+        "//runtimes/node/tools:make_patches.py",
+        "@node_versions//:versions.json",
+    ],
+    env = {
+        "VERSIONS_JSON": "$(rootpath @node_versions//:versions.json)",
+        "MODULE_BAZEL": "$(rootpath //:MODULE.bazel)",
+        "README": "$(rootpath //:README.md)",
+        "STATUS": "$(rootpath //:STATUS.md)",
+        "WORKFLOW": "$(rootpath //.github/workflows:ci.yml)",
+        "MAKE_PATCHES": "$(rootpath //runtimes/node/tools:make_patches.py)",
+        "PATCHES": "$(rootpaths //runtimes/node/patches:all)",
+    },
+    size = "small",
+)
+
+py_test(
+    name = "make_patches_test",
+    srcs = ["make_patches_test.py"],
+    data = [
+        "//runtimes/node:build_node.py",
+        "//runtimes/node/tools:make_patches.py",
+    ],
+    env = {
+        "BUILD_NODE": "$(rootpath //runtimes/node:build_node.py)",
+        "MAKE_PATCHES": "$(rootpath //runtimes/node/tools:make_patches.py)",
+    },
+    size = "small",
+)
+
+py_test(
+    name = "add_node_version_test",
+    srcs = ["add_node_version_test.py"],
+    data = [
+        "//:MODULE.bazel",
+        "//:README.md",
+        "//:STATUS.md",
+        "//runtimes/node:manifest.json",
+        "//runtimes/node/tools:add_node_version.py",
+    ],
+    env = {
+        "ADD_NODE_VERSION": "$(rootpath //runtimes/node/tools:add_node_version.py)",
+        "MODULE_BAZEL": "$(rootpath //:MODULE.bazel)",
+        "NODE_MANIFEST": "$(rootpath //runtimes/node:manifest.json)",
+        "README": "$(rootpath //:README.md)",
+        "STATUS": "$(rootpath //:STATUS.md)",
+    },
+    size = "small",
+)
+
+# One target per line, so the manifest can name what a build leg tests.
+[test_suite(
+    name = "node_%d_tests" % major,
+    tests = [":%s_%d_test" % (kind, major) for kind in ("source", "hermetic", "network", "system_ca")],
+) for major in NODE_VERSIONS]

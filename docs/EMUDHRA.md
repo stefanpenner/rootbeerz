@@ -1,6 +1,6 @@
 # eMudhra test domains
 
-`tests/network_test.py` uses these hosts. This file records where they come from and what they did.
+`runtimes/node/tests/network_test.py` uses these hosts. This file records where they come from and what they did.
 
 ## Why these hosts
 

@@ -1,0 +1,5 @@
+# Maintainer scripts for the Node lines.
+exports_files(
+    glob(["*.py"]),
+    visibility = ["//visibility:public"],
+)

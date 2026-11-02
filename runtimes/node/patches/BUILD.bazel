@@ -1,0 +1,7 @@
+exports_files(glob(["*/*.patch"]))
+
+filegroup(
+    name = "all",
+    srcs = glob(["*/*.patch"]),
+    visibility = ["//visibility:public"],
+)
