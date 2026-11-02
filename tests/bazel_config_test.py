@@ -64,7 +64,7 @@ class RemoteExecution(unittest.TestCase):
 
     def test_config_selects_the_linux_platform_for_target_host_and_execution(self):
         for flag in ("platforms", "host_platform", "extra_execution_platforms"):
-            self.assertIn(f"build:remote-exec --{flag}=//platforms:linux_x64_rbe", settings())
+            self.assertIn(f"build:remote-exec --{flag}=//toolchain/platforms:linux_x64_rbe", settings())
 
     def test_config_has_no_endpoint_and_no_secret(self):
         for line in settings():
@@ -94,8 +94,8 @@ class RemoteExecution(unittest.TestCase):
         self.assertIn('"rootbeer_remote": "1"', block)
 
     def test_remote_builds_run_6_jobs_and_docker_builds_run_5(self):
-        self.assertIn('"//bazel:linux_x64_remote": 6,', NODE_DEFS)
-        self.assertIn('"//bazel:linux_x64": 5,', NODE_DEFS)
+        self.assertIn('"//toolchain:linux_x64_remote": 6,', NODE_DEFS)
+        self.assertIn('"//toolchain:linux_x64": 5,', NODE_DEFS)
 
 
 if __name__ == "__main__":

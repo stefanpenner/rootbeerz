@@ -34,7 +34,7 @@ var (
 	repoPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*/[A-Za-z0-9][A-Za-z0-9._-]*$`)
 )
 
-// readRuntimes gives Node from MODULE.bazel, then one runtime for each runtimes/*.json file.
+// readRuntimes gives Node from MODULE.bazel, then one runtime for each runtimes/*/manifest.json file.
 // A missing runtimes directory is no error. Each runtime lands in its own pull request.
 func readRuntimes(root string) ([]runtime, error) {
 	module, err := os.ReadFile(filepath.Join(root, "MODULE.bazel"))
@@ -47,7 +47,7 @@ func readRuntimes(root string) ([]runtime, error) {
 	}
 	runtimes := []runtime{{Name: "node", Kind: kindNode, File: "MODULE.bazel", Pins: pins}}
 
-	manifests, err := filepath.Glob(filepath.Join(root, "runtimes", "*.json"))
+	manifests, err := filepath.Glob(filepath.Join(root, "runtimes", "*", "manifest.json"))
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +59,7 @@ func readRuntimes(root string) ([]runtime, error) {
 		if parsed.Kind == kindNode {
 			continue // MODULE.bazel holds the Node pins, and add_node_version.py edits both files.
 		}
-		parsed.File = filepath.Join("runtimes", filepath.Base(path))
+		parsed.File = filepath.Join("runtimes", filepath.Base(filepath.Dir(path)), "manifest.json")
 		runtimes = append(runtimes, parsed)
 	}
 	return runtimes, nil

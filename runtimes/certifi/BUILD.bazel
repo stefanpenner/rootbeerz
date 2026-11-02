@@ -1,0 +1,18 @@
+load("@certifi_stock//:version.bzl", "CERTIFI_VERSION")
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load(":defs.bzl", "certifi_wheel")
+
+exports_files(["manifest.json"])
+
+py_binary(
+    name = "build_wheel",
+    srcs = ["build_wheel.py"],
+)
+
+# The manifest pins the version. A bump changes only runtimes/certifi/manifest.json.
+certifi_wheel(
+    name = "certifi",
+    srcs = glob(["src/certifi/*"]),
+    version = CERTIFI_VERSION,
+    visibility = ["//runtimes/certifi/tests:__pkg__"],
+)

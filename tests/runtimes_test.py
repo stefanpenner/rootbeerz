@@ -18,7 +18,7 @@ FILTER = os.environ["MATRIX_FILTER"]
 
 
 def manifests():
-    return {path.stem: json.loads(path.read_text()) for path in MANIFESTS}
+    return {path.parent.name: json.loads(path.read_text()) for path in MANIFESTS}
 
 
 def module_node_versions():
@@ -42,15 +42,17 @@ def legs(scope, paths):
 
 
 def manifest_file(folder, runtime, lines, systems=("macos-14", "ubuntu-latest")):
-    path = Path(folder) / f"{runtime}.json"
+    path = Path(folder) / runtime / "manifest.json"
+    path.parent.mkdir(exist_ok=True)
     versions = [
         {
             "line": line,
             "version": version,
             "sha256": "0" * 64,
-            "target": f"//{runtime}:rootbeerz_{line}",
-            "test": f"//tests/{runtime}:hermetic_{line}_test",
-            "artifact": f"bazel-bin/{runtime}/rootbeerz_{line}",
+            "target": f"//runtimes/{runtime}:{runtime}_{line}",
+            "test": f"//runtimes/{runtime}/tests:{runtime}_{line}_tests",
+            "system_ca_test": f"//runtimes/{runtime}/tests:system_ca_{line}_test",
+            "artifact": f"bazel-bin/runtimes/{runtime}/{runtime}_{line}",
         }
         for line, version in lines
     ]
@@ -65,15 +67,54 @@ class ManifestContract(unittest.TestCase):
     def test_each_manifest_obeys_the_contract(self):
         for path in MANIFESTS:
             manifest = json.loads(path.read_text())
-            with self.subTest(path=path.name):
-                self.assertEqual(manifest["runtime"], path.stem)
+            with self.subTest(path=str(path)):
+                self.assertEqual(manifest["runtime"], path.parent.name)
                 self.assertIn(manifest["upstream"]["kind"], KINDS)
                 self.assertTrue(manifest["os"])
                 self.assertTrue(manifest["versions"])
                 for version in manifest["versions"]:
                     self.assertRegex(version["sha256"], SHA256)
-                    for name in ("line", "version", "target", "test", "artifact"):
+                    for name in ("line", "version", "target", "test", "system_ca_test", "artifact"):
                         self.assertTrue(version[name], name)
+
+
+class Layout(unittest.TestCase):
+    """Each runtime owns runtimes/<runtime>/. Targets and artifacts keep the runtime name."""
+
+    def versions(self):
+        for runtime, manifest in manifests().items():
+            for version in manifest["versions"]:
+                yield runtime, version
+
+    def test_each_manifest_lives_in_its_runtime_folder(self):
+        for path in MANIFESTS:
+            self.assertEqual(path.name, "manifest.json")
+            self.assertEqual(path.parent.parent.name, "runtimes")
+
+    def test_labels_and_artifacts_live_in_the_runtime_folder(self):
+        for runtime, version in self.versions():
+            with self.subTest(runtime=runtime, line=version["line"]):
+                self.assertTrue(version["target"].startswith(f"//runtimes/{runtime}:"))
+                self.assertTrue(version["test"].startswith(f"//runtimes/{runtime}/tests:"))
+                self.assertTrue(version["artifact"].startswith(f"bazel-bin/runtimes/{runtime}/"))
+
+    def test_no_target_or_artifact_carries_the_repo_name(self):
+        for runtime, version in self.versions():
+            for field in ("target", "test", "system_ca_test", "artifact"):
+                with self.subTest(runtime=runtime, line=version["line"], field=field):
+                    self.assertNotIn("rootbeer", version[field])
+
+    def test_each_version_names_its_system_store_test(self):
+        for runtime, version in self.versions():
+            with self.subTest(runtime=runtime, line=version["line"]):
+                self.assertEqual(version["system_ca_test"],
+                                 f"//runtimes/{runtime}/tests:system_ca_{version['line']}_test")
+
+    def test_module_labels_name_the_toolchain_or_a_runtime(self):
+        labels = re.findall(r'"(//[^"]*)"', MODULE)
+        self.assertTrue(labels)
+        for label in labels:
+            self.assertRegex(label, r"^//(toolchain|runtimes/[a-z]+)[/:]")
 
 
 class NodeDrift(unittest.TestCase):
@@ -129,9 +170,10 @@ class Matrix(unittest.TestCase):
                     "runtime": "deno",
                     "line": "2",
                     "version": "2.1.0",
-                    "target": "//deno:rootbeerz_2",
-                    "test": "//tests/deno:hermetic_2_test",
-                    "artifact": "bazel-bin/deno/rootbeerz_2",
+                    "target": "//runtimes/deno:deno_2",
+                    "test": "//runtimes/deno/tests:deno_2_tests",
+                    "system_ca_test": "//runtimes/deno/tests:system_ca_2_test",
+                    "artifact": "bazel-bin/runtimes/deno/deno_2",
                     "os": "ubuntu-latest",
                 }
             ],

@@ -1,0 +1,34 @@
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
+load("@jdk_versions//:versions.bzl", "JDK_VERSIONS")
+load(":defs.bzl", "jdk_tests")
+
+py_library(
+    name = "jdklib",
+    srcs = ["jdklib.py"],
+    imports = ["."],
+    deps = ["//trust/testing:trustlib"],
+)
+
+py_test(
+    name = "manifest_test",
+    srcs = ["manifest_test.py"],
+    data = [
+        "//:MODULE.bazel",
+        "//runtimes/jdk:manifest.json",
+    ],
+    env = {
+        "MANIFEST": "$(rootpath //runtimes/jdk:manifest.json)",
+        "MODULE_BAZEL": "$(rootpath //:MODULE.bazel)",
+    },
+    size = "small",
+)
+
+py_test(
+    name = "driver_test",
+    srcs = ["driver_test.py"],
+    deps = ["//runtimes/jdk:build_jdk_lib"],
+    size = "small",
+)
+
+[jdk_tests(line) for line in JDK_VERSIONS]

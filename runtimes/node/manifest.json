@@ -1,0 +1,66 @@
+{
+  "runtime": "node",
+  "upstream": {
+    "kind": "nodejs-dist"
+  },
+  "os": [
+    "macos-14",
+    "ubuntu-latest"
+  ],
+  "versions": [
+    {
+      "line": "26",
+      "version": "26.13.0",
+      "sha256": "986ead18ef18256831bae3e57d94aef680a7b84cfd4044f3e8471f833fbd7191",
+      "target": "//runtimes/node:dist_26",
+      "test": "//runtimes/node/tests:node_26_tests",
+      "system_ca_test": "//runtimes/node/tests:system_ca_26_test",
+      "artifact": "bazel-bin/runtimes/node/node-v26.13.0-*.tar.gz*"
+    },
+    {
+      "line": "24",
+      "version": "24.22.2",
+      "sha256": "b2f5443a34a38d863e87c0f5f80c03630fc16917dfe16f26c1cec44c0b542959",
+      "target": "//runtimes/node:dist_24",
+      "test": "//runtimes/node/tests:node_24_tests",
+      "system_ca_test": "//runtimes/node/tests:system_ca_24_test",
+      "artifact": "bazel-bin/runtimes/node/node-v24.22.2-*.tar.gz*"
+    },
+    {
+      "line": "22",
+      "version": "22.23.4",
+      "sha256": "4dd79de8cdc85d65cb32f48a75aee1067bf00bf94b96ecc8e4c2f82f6f0272c2",
+      "target": "//runtimes/node:dist_22",
+      "test": "//runtimes/node/tests:node_22_tests",
+      "system_ca_test": "//runtimes/node/tests:system_ca_22_test",
+      "artifact": "bazel-bin/runtimes/node/node-v22.23.4-*.tar.gz*"
+    },
+    {
+      "line": "20",
+      "version": "20.20.2",
+      "sha256": "8cb85a81f75169eb811f7b2512cf17a646826430debbe016a7461f31e286fdef",
+      "target": "//runtimes/node:dist_20",
+      "test": "//runtimes/node/tests:node_20_tests",
+      "system_ca_test": "//runtimes/node/tests:system_ca_20_test",
+      "artifact": "bazel-bin/runtimes/node/node-v20.20.2-*.tar.gz*"
+    },
+    {
+      "line": "18",
+      "version": "18.20.8",
+      "sha256": "ec60a6d2344ef9e1f093991ca1bb6bbe92c61c29d1762c4b99e08f87dbb91e2f",
+      "target": "//runtimes/node:dist_18",
+      "test": "//runtimes/node/tests:node_18_tests",
+      "system_ca_test": "//runtimes/node/tests:system_ca_18_test",
+      "artifact": "bazel-bin/runtimes/node/node-v18.20.8-*.tar.gz*"
+    },
+    {
+      "line": "16",
+      "version": "16.20.2",
+      "sha256": "33188eb11b977113adb65b2e09d71bddd63f12168ba73ceadae6c27938dc9e93",
+      "target": "//runtimes/node:dist_16",
+      "test": "//runtimes/node/tests:node_16_tests",
+      "system_ca_test": "//runtimes/node/tests:system_ca_16_test",
+      "artifact": "bazel-bin/runtimes/node/node-v16.20.2-*.tar.gz*"
+    }
+  ]
+}

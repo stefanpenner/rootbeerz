@@ -1,4 +1,4 @@
-# Input: the slurped runtimes/*.json. Output: a GitHub Actions matrix.
+# Input: the slurped runtimes/*/manifest.json. Output: a GitHub Actions matrix.
 # --arg scope all gives every version. --arg scope pr gives the oldest and the newest of each runtime.
 # tests/runtimes_test.py runs this filter.
 
@@ -18,5 +18,5 @@ def picked:
   | ($manifest.versions | picked)[] as $version
   | ($manifest.os[] | hosted) as $os
   | $version
-  | {runtime: $manifest.runtime, line, version, target, test, artifact, os: $os}
+  | {runtime: $manifest.runtime, line, version, target, test, system_ca_test, artifact, os: $os}
 ]}

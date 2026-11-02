@@ -11,8 +11,14 @@ inputs:
   target:
     description: Bazel target to build.
     required: true
+  version:
+    description: Upstream version, for example 22.23.4.
+    required: true
   test:
     description: Bazel test target or test suite.
+    required: true
+  system_ca_test:
+    description: Bazel test that proves that the runtime trusts the system store.
     required: true
   artifact:
     description: Path or glob of the files to upload.
@@ -37,19 +43,29 @@ runs:
       shell: bash
       env:
         TEST: ${{ inputs.test }}
+        SYSTEM_CA_TEST: ${{ inputs.system_ca_test }}
       run: |
         bazel test --jobs=HOST_CPUS --local_resources=cpu=HOST_CPUS \
           --local_resources=memory=HOST_RAM*.8 \
-          "$TEST"
+          "$TEST" "$SYSTEM_CA_TEST"
 
     - name: Collect the artifact
       shell: bash
       env:
         ARTIFACT: ${{ inputs.artifact }}
+        NAME: ${{ inputs.runtime }}-${{ inputs.version }}-${{ runner.os }}-${{ runner.arch }}
       run: |
         mkdir -p out
         # The path may be a glob, so it has no quotes.
-        cp -RL $ARTIFACT out/
+        case "$ARTIFACT" in
+          *.tar.gz*) cp -L $ARTIFACT out/ ;;
+          *)
+            mkdir -p "stage/$NAME"
+            cp -RL $ARTIFACT "stage/$NAME/"
+            tar -C stage -czf "out/$NAME.tar.gz" "$NAME"
+            ;;
+        esac
+        (cd out && for f in *.tar.gz; do [ -e "$f.sha256" ] || shasum -a 256 "$f" > "$f.sha256"; done)
 
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:

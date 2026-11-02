@@ -20,7 +20,7 @@ LINUX_USES_THE_VARIABLE = (
     "${{ startsWith(matrix.os, 'ubuntu-') && "
     "fromJSON(vars.CI_RUNS_ON || '\"ubuntu-latest\"') || matrix.os }}"
 )
-# These jobs turn runtimes/*.json into the build matrix. They run jq and no build.
+# These jobs turn runtimes/*/manifest.json into the build matrix. They run jq and no build.
 MATRIX_JOBS = {"matrix": "all", "matrix-pr": "pr"}
 
 
@@ -116,7 +116,7 @@ class MatrixJobs(unittest.TestCase):
     def test_each_matrix_job_reads_every_manifest_with_its_scope(self):
         for name, scope in MATRIX_JOBS.items():
             text = jobs()[name]
-            self.assertIn(f"          legs=$(jq -c -s --arg scope {scope} -f .github/workflows/runtime-matrix.jq runtimes/*.json)\n", text)
+            self.assertIn(f"          legs=$(jq -c -s --arg scope {scope} -f .github/workflows/runtime-matrix.jq runtimes/*/manifest.json)\n", text)
 
     def test_matrix_jobs_only_run_jq(self):
         for name in MATRIX_JOBS:
@@ -157,7 +157,7 @@ class Build(unittest.TestCase):
     def test_build_jobs_use_the_build_action(self):
         for name, text in self.build_jobs().items():
             self.assertIn("uses: ./.github/actions/build", text, name)
-            for key in ("runtime", "line", "target", "test", "artifact"):
+            for key in ("runtime", "line", "version", "target", "test", "system_ca_test", "artifact"):
                 self.assertIn(f"{key}: ${{{{ matrix.{key} }}}}", text, name)
 
     def test_build_jobs_wait_only_for_their_matrix_job(self):
@@ -200,10 +200,16 @@ class BuildAction(unittest.TestCase):
         self.assertIn("--output_groups=+dist", ACTION)
         self.assertIn('"$TARGET"', ACTION)
         self.assertIn('bazel test', ACTION)
-        self.assertIn('"$TEST"', ACTION)
+        self.assertIn('"$TEST" "$SYSTEM_CA_TEST"', ACTION)
         self.assertIn("upload-artifact@", ACTION)
         self.assertIn("name: ${{ inputs.runtime }}-${{ inputs.line }}-${{ runner.os }}-${{ runner.arch }}", ACTION)
         self.assertIn("if-no-files-found: error", ACTION)
+
+    def test_each_upload_is_a_tarball_with_a_sha256(self):
+        # A release publishes these files as they are, so each one must be a download.
+        self.assertIn('tar -C stage -czf "out/$NAME.tar.gz" "$NAME"', ACTION)
+        self.assertIn('shasum -a 256 "$f" > "$f.sha256"', ACTION)
+        self.assertIn("NAME: ${{ inputs.runtime }}-${{ inputs.version }}-${{ runner.os }}-${{ runner.arch }}", ACTION)
 
     def test_inputs_reach_the_shell_only_through_env(self):
         for block in re.findall(r"run: \|\n((?:        .*\n)+)", ACTION):

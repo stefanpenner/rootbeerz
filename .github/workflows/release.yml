@@ -1,0 +1,42 @@
+# A tag v* publishes a GitHub Release. The release builds nothing.
+# It downloads the artifacts of the green CI push run for the tagged commit.
+# So tag a commit on main only after its CI run passes.
+# tests/release_test.py checks these rules.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download the artifacts of the CI run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$SHA" --event push --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          if [ -z "$run" ]; then
+            echo "No green CI push run for $SHA. Tag a commit on main after its CI run passes." >&2
+            exit 1
+          fi
+          gh run download "$run" -R "$GITHUB_REPOSITORY" --dir dist
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir release
+          find dist -type f -name '*.tar.gz' -exec cp {} release/ \;
+          cd release
+          sha256sum -- *.tar.gz > SHA256SUMS
+          printf 'Runtimes with no bundled root certificates. Each one uses the system store.\n\nCheck a download: sha256sum -c SHA256SUMS --ignore-missing\n' > notes.md
+          gh release create "$TAG" -R "$GITHUB_REPOSITORY" --title "$TAG" --notes-file notes.md -- *.tar.gz SHA256SUMS

@@ -1,0 +1,16 @@
+load("@rules_python//python:py_library.bzl", "py_library")
+
+package(default_visibility = ["//visibility:public"])
+
+# Shared helpers for the trust tests of each runtime.
+py_library(
+    name = "trustlib",
+    srcs = [
+        "crypto_bundle.py",
+        "teethlib.py",
+        "trustlib.py",
+    ],
+    imports = ["."],
+)
+
+exports_files(glob(["fixtures/*"]) + ["probe.js"])

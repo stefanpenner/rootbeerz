@@ -1,0 +1,83 @@
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
+
+py_library(
+    name = "probelib",
+    srcs = ["probelib.py"],
+    imports = ["."],
+)
+
+COMMON_DATA = [
+    "//runtimes/certifi:certifi",
+    "//trust/testing:fixtures/emsign-roots.pem",
+    "//trust/testing:fixtures/empty.pem",
+    "//trust:mozilla-no-emsign.pem",
+    "@certifi_stock//:certifi.whl",
+]
+
+COMMON_ENV = {
+    "CERTIFI_SHIM_WHEEL": "$(rootpath //runtimes/certifi:certifi)",
+    "CERTIFI_STOCK_WHEEL": "$(rootpath @certifi_stock//:certifi.whl)",
+    "EMSIGN_STORE": "$(rootpath //trust/testing:fixtures/emsign-roots.pem)",
+    "EMPTY_STORE": "$(rootpath //trust/testing:fixtures/empty.pem)",
+    "PINNED_STORE": "$(rootpath //trust:mozilla-no-emsign.pem)",
+}
+
+py_test(
+    name = "hermetic_test",
+    srcs = ["hermetic_test.py"],
+    deps = [":probelib"],
+    data = COMMON_DATA + [
+        "//runtimes/certifi:manifest.json",
+        "//trust/testing:fixtures/testonly-ca.pem",
+        "//trust/testing:fixtures/testonly-leaf.key",
+        "//trust/testing:fixtures/testonly-leaf.pem",
+    ],
+    env = COMMON_ENV | {
+        "CERTIFI_MANIFEST": "$(rootpath //runtimes/certifi:manifest.json)",
+        "TEST_CA": "$(rootpath //trust/testing:fixtures/testonly-ca.pem)",
+        "TEST_LEAF": "$(rootpath //trust/testing:fixtures/testonly-leaf.pem)",
+        "TEST_LEAF_KEY": "$(rootpath //trust/testing:fixtures/testonly-leaf.key)",
+    },
+    size = "small",
+)
+
+py_test(
+    name = "network_test",
+    srcs = ["network_test.py"],
+    deps = [
+        ":probelib",
+        "//trust/testing:trustlib",
+    ],
+    data = COMMON_DATA,
+    env = COMMON_ENV,
+    size = "large",
+    tags = [
+        "external",
+        "no-cache",
+        "no-remote",
+        "requires-network",
+    ],
+)
+
+py_test(
+    name = "system_ca_current_test",
+    srcs = [
+        "network_test.py",
+        "system_ca_test.py",
+    ],
+    main = "system_ca_test.py",
+    deps = [
+        ":probelib",
+        "//trust/testing:trustlib",
+    ],
+    data = COMMON_DATA,
+    env = COMMON_ENV,
+    size = "large",
+    tags = [
+        "external",
+        "no-cache",
+        "no-remote",
+        "requires-network",
+    ],
+)

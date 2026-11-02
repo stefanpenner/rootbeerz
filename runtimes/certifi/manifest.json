@@ -1,0 +1,16 @@
+{
+  "runtime": "certifi",
+  "upstream": {"kind": "pypi", "package": "certifi"},
+  "os": ["macos-14", "ubuntu-latest"],
+  "versions": [
+    {
+      "line": "current",
+      "version": "2026.10.23",
+      "sha256": "e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1",
+      "target": "//runtimes/certifi:certifi",
+      "test": "//runtimes/certifi/tests:hermetic_test",
+      "system_ca_test": "//runtimes/certifi/tests:system_ca_current_test",
+      "artifact": "bazel-bin/runtimes/certifi/dist"
+    }
+  ]
+}

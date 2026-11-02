@@ -1,4 +1,4 @@
 exports_files(
     ["HERMETICITY.md"],
-    visibility = ["//tests:__pkg__"],
+    visibility = ["//visibility:public"],
 )

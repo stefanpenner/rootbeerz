@@ -15,12 +15,12 @@ func TestEditManifestBumpsOneLine(t *testing.T) {
 	const text = `{
   "runtime": "jdk",
   "versions": [
-    {"line": "25", "version": "25.0.2+1", "sha256": "aa", "target": "//jdk:t_25"},
+    {"line": "25", "version": "25.0.2+1", "sha256": "aa", "target": "//runtimes/jdk:t_25"},
     {
       "line": "21",
       "version": "21.0.12+9",
       "sha256": "bb",
-      "target": "//jdk:t_21"
+      "target": "//runtimes/jdk:t_21"
     }
   ]
 }
@@ -64,14 +64,14 @@ func TestEditManifestAddsANewLineFromTheTopEntry(t *testing.T) {
 	added, kept := parsed.Versions[0], parsed.Versions[1]
 	want := map[string]string{
 		"line": "3", "version": "3.0.0", "sha256": newSum,
-		"target": "//deno:rootbeerz_3", "test": "//tests/deno:hermetic_3_test", "artifact": "bazel-bin/deno/rootbeerz_3",
+		"target": "//runtimes/deno:deno_3", "test": "//runtimes/deno/tests:hermetic_3_test", "artifact": "bazel-bin/runtimes/deno/deno_3",
 	}
 	for key, value := range want {
 		if added[key] != value {
 			t.Errorf("%s = %q, want %q", key, added[key], value)
 		}
 	}
-	if kept["version"] != "2.9.7" || kept["target"] != "//deno:rootbeerz_2" {
+	if kept["version"] != "2.9.7" || kept["target"] != "//runtimes/deno:deno_2" {
 		t.Errorf("kept = %v", kept)
 	}
 }
@@ -211,19 +211,19 @@ func TestApplyNewNodeMajorOmitsTheWorkflowAndFlagsIt(t *testing.T) {
 	}
 }
 
-// After PR #30 the Node tool edits runtimes/node.json and not ci.yml. The file reaches the commit.
+// After PR #30 the Node tool edits runtimes/node/manifest.json and not ci.yml. The file reaches the commit.
 func TestApplyNewNodeMajorWithTheNodeManifest(t *testing.T) {
 	root := nodeTree(t)
-	writeFile(t, root, "runtimes/node.json", "{}")
+	writeFile(t, root, "runtimes/node/manifest.json", "{}")
 	edit := func(string, ...string) error {
-		return os.WriteFile(filepath.Join(root, "runtimes/node.json"), []byte(`{"versions":[]}`), 0o644)
+		return os.WriteFile(filepath.Join(root, "runtimes/node/manifest.json"), []byte(`{"versions":[]}`), 0o644)
 	}
 	node := runtime{Name: "node", Kind: kindNode, File: "MODULE.bazel"}
 	applied, err := apply(root, edit, node, update{Line: "27", New: "27.0.0", NewLine: true, Shasums: "sums"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := changePaths(applied.Changes); got != "M runtimes/node.json" {
+	if got := changePaths(applied.Changes); got != "M runtimes/node/manifest.json" {
 		t.Fatalf("changes = %s", got)
 	}
 	joined := strings.Join(applied.Flags, " ")
@@ -234,20 +234,20 @@ func TestApplyNewNodeMajorWithTheNodeManifest(t *testing.T) {
 
 func TestApplyManifest(t *testing.T) {
 	root := nodeTree(t)
-	writeFile(t, root, "runtimes/deno.json", denoManifest)
-	deno := runtime{Name: "deno", Kind: kindGitHubRelease, File: "runtimes/deno.json"}
+	writeFile(t, root, "runtimes/deno/manifest.json", denoManifest)
+	deno := runtime{Name: "deno", Kind: kindGitHubRelease, File: "runtimes/deno/manifest.json"}
 	refuse := func(string, ...string) error { return errors.New("a manifest needs no command") }
 	applied, err := apply(root, refuse, deno, update{Line: "2", Old: "2.9.7", New: "2.9.8", SHA256: newSum})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := changePaths(applied.Changes); got != "M runtimes/deno.json" {
+	if got := changePaths(applied.Changes); got != "M runtimes/deno/manifest.json" {
 		t.Fatalf("changes = %s", got)
 	}
 	if !strings.Contains(string(applied.Changes[0].Content), `"version": "2.9.8"`) {
 		t.Fatalf("content = %s", applied.Changes[0].Content)
 	}
-	if text, _ := os.ReadFile(filepath.Join(root, "runtimes/deno.json")); string(text) != denoManifest {
+	if text, _ := os.ReadFile(filepath.Join(root, "runtimes/deno/manifest.json")); string(text) != denoManifest {
 		t.Fatal("apply must not leave the edit in the tree")
 	}
 }

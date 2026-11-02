@@ -28,9 +28,9 @@ build --@rules_python//python/config_settings:bootstrap_impl=script
 # only to local execution, and the scheduler does not read it. docs/HERMETICITY.md has the measurements.
 # The macOS build cannot run remotely, because the SDK comes from the host.
 build:remote-exec --define=rootbeer_remote=1
-build:remote-exec --platforms=//platforms:linux_x64_rbe
-build:remote-exec --host_platform=//platforms:linux_x64_rbe
-build:remote-exec --extra_execution_platforms=//platforms:linux_x64_rbe
+build:remote-exec --platforms=//toolchain/platforms:linux_x64_rbe
+build:remote-exec --host_platform=//toolchain/platforms:linux_x64_rbe
+build:remote-exec --extra_execution_platforms=//toolchain/platforms:linux_x64_rbe
 build:remote-exec --spawn_strategy=remote
 build:remote-exec --noremote_local_fallback
 build:remote-exec --remote_timeout=3h

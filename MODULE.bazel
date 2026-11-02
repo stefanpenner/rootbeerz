@@ -31,7 +31,7 @@ http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_
 # Node sources and the stock control binaries. One tag is the whole entry for a version.
 # tools/add_node_version.py prints a new tag. Each sha256 comes from the release SHASUMS256.txt.
 # old_v8 selects the patches and warning flags that the V8 of Node 16 and 18 needs.
-node = use_extension("//bazel:node_versions.bzl", "node")
+node = use_extension("//runtimes/node:node_versions.bzl", "node")
 
 node.version(
     major = "26",
@@ -100,30 +100,30 @@ http_file(
     urls = ["https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64"],
 )
 
-# Bun source and stock binaries. The version and the source sha256 come from runtimes/bun.json.
-bun = use_extension("//bun:versions.bzl", "bun")
+# Bun source and stock binaries. The version and the source sha256 come from runtimes/bun/manifest.json.
+bun = use_extension("//runtimes/bun:versions.bzl", "bun")
 use_repo(bun, "bun_1_inputs", "bun_1_src", "bun_1_stock_darwin_arm64", "bun_1_stock_linux_x64", "bun_1_tarball")
 
-# The JDK source, the boot JDK, and the build tools. runtimes/jdk.json holds each pin.
-jdk = use_extension("//jdk:extension.bzl", "jdk")
+# The JDK source, the boot JDK, and the build tools. runtimes/jdk/manifest.json holds each pin.
+jdk = use_extension("//runtimes/jdk:extension.bzl", "jdk")
 use_repo(jdk, "jdk_versions")
 
-# The stock certifi control. runtimes/certifi.json owns the version and the sha256.
-certifi_stock = use_repo_rule("//certifi:stock.bzl", "certifi_stock")
+# The stock certifi control. runtimes/certifi/manifest.json owns the version and the sha256.
+certifi_stock = use_repo_rule("//runtimes/certifi:stock.bzl", "certifi_stock")
 
 certifi_stock(name = "certifi_stock")
 
 # The hermetic toolchain. docs/HERMETICITY.md gives the rung of each input.
 # These toolchains take priority over a toolchain that a dependency registers.
-register_toolchains("//bazel/cc:all")
+register_toolchains("//toolchain/cc:all")
 
-macos_sdk = use_repo_rule("//bazel:sdk.bzl", "macos_sdk")
+macos_sdk = use_repo_rule("//toolchain:sdk.bzl", "macos_sdk")
 
 macos_sdk(name = "macos_sdk")
 
 http_archive(
     name = "llvm_darwin_arm64",
-    build_file = "//bazel:llvm.BUILD",
+    build_file = "//toolchain:llvm.BUILD",
     sha256 = "d93bf12952d89fe4ec7501c40475718b722407da6a8d651f05c995863468e570",
     strip_prefix = "LLVM-19.1.7-macOS-ARM64",
     urls = ["https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.7/LLVM-19.1.7-macOS-ARM64.tar.xz"],
@@ -131,7 +131,7 @@ http_archive(
 
 http_archive(
     name = "llvm_linux_x64",
-    build_file = "//bazel:llvm.BUILD",
+    build_file = "//toolchain:llvm.BUILD",
     sha256 = "4a5ec53951a584ed36f80240f6fbf8fdd46b4cf6c7ee87cc2d5018dc37caf679",
     strip_prefix = "LLVM-19.1.7-Linux-X64",
     urls = ["https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.7/LLVM-19.1.7-Linux-X64.tar.xz"],
@@ -157,7 +157,7 @@ http_archive(
 # Node's -latomic must select libatomic.a, so the binary does not need libatomic.so.1 from the host.
 http_archive(
     name = "linux_sysroot",
-    build_file = "//bazel:linux_sysroot.BUILD",
+    build_file = "//toolchain:linux_sysroot.BUILD",
     patch_cmds = [
         "printf '{\"path\": \".\", \"version\": \"debian-bullseye-amd64\", \"settings_sha256\": \"5df5be9357b425cdd70d92d4697d07e7d55d7a923f037c22dc80a78e85842d2c\"}\\n' > info.json",
         "rm usr/lib/gcc/x86_64-linux-gnu/10/libatomic.so",
@@ -166,7 +166,7 @@ http_archive(
     urls = ["https://commondatastorage.googleapis.com/chrome-linux-sysroot/toolchain/4f611ec025be98214164d4bf9fbe8843f58533f7/debian_bullseye_amd64_sysroot.tar.xz"],
 )
 
-deno = use_extension("//deno:versions.bzl", "deno")
+deno = use_extension("//runtimes/deno:versions.bzl", "deno")
 use_repo(
     deno,
     "deno_2_crates",

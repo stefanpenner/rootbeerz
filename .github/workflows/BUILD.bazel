@@ -1,8 +1,9 @@
 exports_files(
     [
         "ci.yml",
+        "release.yml",
         "version-bumps.yml",
         "runtime-matrix.jq",
     ],
-    visibility = ["//tests:__pkg__"],
+    visibility = ["//visibility:public"],
 )

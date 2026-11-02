@@ -1,0 +1,13 @@
+exports_files(
+    [
+        "Dockerfile",
+        "Dockerfile.dockerignore",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "context",
+    srcs = glob(["etc/*"]),
+    visibility = ["//visibility:public"],
+)

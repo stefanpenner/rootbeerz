@@ -22,16 +22,16 @@ Each input has a rung. A lower rung is stronger.
 | Stock Node controls | nodejs.org, checksum from `SHASUMS256.txt` | 0 |
 | rootbeerz patches | This repository | 0 |
 | Clang, lld, libc++ 19.1.7 | LLVM GitHub release | 1 |
-| C++ toolchain configuration | `bazel/cc/`, this repository | 0 |
+| C++ toolchain configuration | `toolchain/cc/`, this repository | 0 |
 | Ninja | Ninja GitHub release | 1 |
 | Python | `rules_python` toolchain, pinned by the module | 0 |
 | Linux sysroot (glibc 2.31, GCC 10 runtime) | Chromium sysroot bucket | 1 |
 | Test CA bundle | `trust/`, derived from curl `cacert.pem` | 0 |
-| Tool wrappers | `bazel/build_node.py` | 2 |
+| Tool wrappers | `runtimes/node/build_node.py` | 2 |
 | macOS SDK | Host, declared as inputs by content | 6 |
 | macOS SDK with `--config=pinned-sdk` (opt-in) | Private tarball, sha256 from the user. Never published. | 1 |
-| Linux image: Bazel 9.1.1 | GitHub release, sha256 in `docker/Dockerfile` | 0 |
-| Linux image: BusyBox, bash, dash, glibc, libstdc++, zlib, zstd, xz, libxml2, ICU | `snapshot.debian.org` `.deb` files, sha256 in `docker/Dockerfile` | 0 |
+| Linux image: Bazel 9.1.1 | GitHub release, sha256 in `runtimes/node/image/Dockerfile` | 0 |
+| Linux image: BusyBox, bash, dash, glibc, libstdc++, zlib, zstd, xz, libxml2, ICU | `snapshot.debian.org` `.deb` files, sha256 in `runtimes/node/image/Dockerfile` | 0 |
 | Linux image: unpack stage | `debian:bookworm-slim`, pinned by digest. It runs `dpkg-deb` and `ln` only. | 0 |
 | Linux image: CA bundle | `trust/mozilla-no-emsign.pem` | 0 |
 | macOS: `/bin` and `/usr/bin` POSIX tools | Host | 6 |
@@ -44,9 +44,9 @@ I computed the LLVM checksums from the downloads.
 ### macOS SDK
 
 The Apple SDK license does not allow a pinned copy in a public repository.
-`bazel/sdk.bzl` selects an SDK from the host.
+`toolchain/sdk.bzl` selects an SDK from the host.
 It writes the path, the version, and a digest of `SDKSettings.json` to `info.json`.
-The repository also links the SDK files as `sdk/`, and `//bazel:sysroot_files` declares them as inputs of the build action.
+The repository also links the SDK files as `sdk/`, and `//toolchain:sysroot_files` declares them as inputs of the build action.
 A change to any SDK file makes a new cache key.
 The tarball records the same values in `BUILDINFO.json`.
 
@@ -60,7 +60,7 @@ They do not make the action read the declared copy. A change to use `sdk/` in th
 Set `ROOTBEER_MACOS_SDK` to select a different SDK.
 
 `ld64.lld` 19 cannot read a `.tbd` file that lists `arm64e.x1`.
-`bazel/sdk.bzl` skips an SDK with this architecture.
+`toolchain/sdk.bzl` skips an SDK with this architecture.
 A host that has only such an SDK fails with a clear message.
 
 ### Optional pinned macOS SDK
@@ -84,7 +84,7 @@ To make and use a tarball:
 
 1. Run `python3 tools/pack_macos_sdk.py --out ~/private/MacOSX.sdk.tar.gz`. Use `--sdk PATH` to select an SDK from Xcode or Command Line Tools.
 2. Add the two printed `common:pinned-sdk` lines to `~/.bazelrc`.
-3. Run `bazel build --config=pinned-sdk //node:rootbeer_22`.
+3. Run `bazel build --config=pinned-sdk //runtimes/node:node_22`.
 
 The helper refuses an output path in a git work tree, and it writes the file with mode 0600.
 The tarball must hold exactly one `*.sdk` directory. The repository rule refuses a wrong checksum, a missing tarball, and an SDK that `ld64.lld` cannot read.
@@ -137,7 +137,7 @@ These libraries come from the host at run time.
 Node passes `-latomic` to the linker on Linux with Clang.
 `MODULE.bazel` removes `libatomic.so` from the sysroot, so the linker selects `libatomic.a`.
 The sysroot ships glibc 2.31, so the binary cannot import a newer symbol.
-`GlibcFloor` in `tests/hermetic_test.py` fails when any imported symbol needs glibc newer than 2.31.
+`GlibcFloor` in `runtimes/node/tests/hermetic_test.py` fails when any imported symbol needs glibc newer than 2.31.
 The measured floor of the current builds is glibc 2.25.
 
 ## Known limits
@@ -174,13 +174,13 @@ The measured floor of the current builds is glibc 2.25.
 | `build --sandbox_default_allow_network=false` | An action cannot use the network. The default sandbox allows it. A probe action reaches a host without the flag and fails with it. The network tests carry `requires-network`, so they keep their access. |
 | `common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1` | The build does not look for a host C++ compiler. |
 | `common --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=1` | `apple_support` does not look for Xcode. It ignores the setting above. |
-| `register_toolchains("//bazel/cc:all")` in `MODULE.bazel` | Each C++ action uses the pinned LLVM. `//tests:cc_toolchain_test` fails if a host compiler returns. On macOS the SDK stays a host input (rung 6). |
+| `register_toolchains("//toolchain/cc:all")` in `MODULE.bazel` | Each C++ action uses the pinned LLVM. `//tests:cc_toolchain_test` fails if a host compiler returns. On macOS the SDK stays a host input (rung 6). |
 
 Every `http_archive` has a `sha256`. No repository rule downloads without a checksum, and no source comes from a Git ref.
 
 ## Reproducibility
 
-The binary must not hold a path of the build machine. `BuildPaths` in `tests/hermetic_test.py` fails when it holds
+The binary must not hold a path of the build machine. `BuildPaths` in `runtimes/node/tests/hermetic_test.py` fails when it holds
 `/execroot/`, `bazel-out/`, or a sandbox path. It found three leaks:
 
 - OpenSSL 3 `MODULESDIR` (Node 18 and newer). `0002-force-local-store.patch` sets it to `/nonexistent/ossl-modules`.
@@ -209,7 +209,7 @@ I found no flag for that. Upstream needed V8 changes (Node 20 and later).
 
 ## Remote execution
 
-`//platforms:linux_x64_rbe` is a Linux x86_64 platform with `OSFamily=linux` and a pinned `container-image`.
+`//toolchain/platforms:linux_x64_rbe` is a Linux x86_64 platform with `OSFamily=linux` and a pinned `container-image`.
 `--config=remote-exec` makes it the target, host, and execution platform, and uses no local fallback.
 The endpoint and the keys belong in `~/.bazelrc`.
 
@@ -222,26 +222,26 @@ What a real run shows, on a Buildbarn runner with a cap of 6 CPUs and 8 GiB:
 
 | Item | Result |
 |---|---|
-| `bazel build --config=remote-exec //node:rootbeer_16` | Pass. 758.8 s. Peak memory 3.0 GiB. |
+| `bazel build --config=remote-exec //runtimes/node:node_16` | Pass. 758.8 s. Peak memory 3.0 GiB. |
 | The same action, new output base, remote cache hit | 18.0 s. |
-| `bazel build --config=remote-exec //node:rootbeer_26`, 6 jobs | Pass. 1620 s. 180 s under the limit. Peak memory 6.31 GiB. One run. |
+| `bazel build --config=remote-exec //runtimes/node:node_26`, 6 jobs | Pass. 1620 s. 180 s under the limit. Peak memory 6.31 GiB. One run. |
 | The 6-job build again, from the merged tree | Remote cache hit, 33 s. Same sha256. |
 | The same build, 5 jobs | Fail. The scheduler stopped the action after 1810 s. Peak memory 5.7 GiB. |
-| `bazel build --config=remote-exec //node:rootbeer_22` | Pass. 1378 s. |
-| `bazel build --config=remote-exec //node:rootbeer_24` | Pass. 1648 s. 152 s under the limit. |
+| `bazel build --config=remote-exec //runtimes/node:node_22` | Pass. 1378 s. |
+| `bazel build --config=remote-exec //runtimes/node:node_24` | Pass. 1648 s. 152 s under the limit. |
 | `bazel test --config=remote-exec //tests:cc_toolchain_test` | Pass. |
-| `bazel test --config=remote-exec //tests:hermetic_16_test`, 6 jobs | Pass. New build, 629 s. |
-| `bazel test --config=remote-exec //tests:hermetic_18_test`, 6 jobs | Pass. New build, 711 s. |
-| `bazel test --config=remote-exec //tests:hermetic_26_test`, 6 jobs | Pass. Remote cache hit for the build, 13 s. |
+| `bazel test --config=remote-exec //runtimes/node/tests:hermetic_16_test`, 6 jobs | Pass. New build, 629 s. |
+| `bazel test --config=remote-exec //runtimes/node/tests:hermetic_18_test`, 6 jobs | Pass. New build, 711 s. |
+| `bazel test --config=remote-exec //runtimes/node/tests:hermetic_26_test`, 6 jobs | Pass. Remote cache hit for the build, 13 s. |
 | Hermetic tests for Node 20, 22, and 24 | Not run. |
 | Node 20 build | Not run. |
 
-The `//node:rootbeer_16`, 22, and 24 rows used 5 jobs. The job count is in the action key, so Node 22 and 24 now need a new build. Their times with 6 jobs are not measured.
+The `//runtimes/node:node_16`, 22, and 24 rows used 5 jobs. The job count is in the action key, so Node 22 and 24 now need a new build. Their times with 6 jobs are not measured.
 
 Limits:
 
-- `bazel/cc/` registers the pinned LLVM and the Linux sysroot as the C++ toolchain, so `bazel test --config=remote-exec` passes analysis.
-- The macOS SDK stays a host input through `bazel/sdk.bzl` (rung 6). The macOS toolchain has this one host input.
+- `toolchain/cc/` registers the pinned LLVM and the Linux sysroot as the C++ toolchain, so `bazel test --config=remote-exec` passes analysis.
+- The macOS SDK stays a host input through `toolchain/sdk.bzl` (rung 6). The macOS toolchain has this one host input.
 - apple_support detects Xcode and ignores `BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN`. `.bazelrc` also sets `BAZEL_NO_APPLE_CPP_TOOLCHAIN=1`.
 - The scheduler limit is the real limit, not memory. The SER9 scheduler stops an action at 1800 s by default.
   - The Bazel flag `--remote_timeout` does not change this limit.
@@ -251,7 +251,7 @@ Limits:
 
 ## Linux container
 
-`docker/Dockerfile` makes a small image that holds only pinned files.
+`runtimes/node/image/Dockerfile` makes a small image that holds only pinned files.
 It has no package manager, no shell other than BusyBox, and no compiler.
 
 | Input | How it is pinned |
@@ -262,13 +262,13 @@ It has no package manager, no shell other than BusyBox, and no compiler.
 | BusyBox and libraries | One `ADD --checksum=sha256:` for each `.deb`. |
 | `.deb` address | `snapshot.debian.org/archive/debian/<timestamp>/`. The address cannot change. |
 | CA bundle | `COPY trust/mozilla-no-emsign.pem`. It is the pinned test bundle of this repository. |
-| `passwd`, `group`, `nsswitch.conf` | `docker/etc/` in this repository. |
+| `passwd`, `group`, `nsswitch.conf` | `runtimes/node/image/etc/` in this repository. |
 
 The packages are `libc6`, `libgcc-s1`, `libstdc++6`, `zlib1g`, `libzstd1`, `liblzma5`,
 `libxml2`, `libicu72`, `libtinfo6`, `bash`, `dash`, and `busybox-static`. The pinned LLVM Linux tools load these libraries.
 `ld.lld` needs `libxml2`, `libicu72`, and `liblzma5`. The other tools need `libstdc++`, `libz`, and `libzstd`.
 
-`tools/pin_debs.py` prints the `ADD` lines for a snapshot timestamp.
+`runtimes/node/tools/pin_debs.py` prints the `ADD` lines for a snapshot timestamp.
 A reviewer can run it again and compare the checksums.
 This tool is the only step that reads an index that is not pinned. The build never runs it.
 

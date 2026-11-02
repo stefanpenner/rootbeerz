@@ -1,4 +1,4 @@
 exports_files(
     ["action.yml"],
-    visibility = ["//tests:__pkg__"],
+    visibility = ["//visibility:public"],
 )

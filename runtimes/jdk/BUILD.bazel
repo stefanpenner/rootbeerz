@@ -1,0 +1,18 @@
+load("@jdk_versions//:versions.bzl", "JDK_VERSIONS")
+load("@rules_python//python:py_library.bzl", "py_library")
+load(":defs.bzl", "jdk_line")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "build_jdk.py",
+    "manifest.json",
+])
+
+py_library(
+    name = "build_jdk_lib",
+    srcs = ["build_jdk.py"],
+    imports = ["."],
+)
+
+[jdk_line(line, version) for line, version in JDK_VERSIONS.items()]
