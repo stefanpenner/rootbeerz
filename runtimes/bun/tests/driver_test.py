@@ -3,6 +3,7 @@
 import importlib.util
 import os
 import pathlib
+import subprocess
 import tempfile
 import unittest
 
@@ -44,6 +45,50 @@ class NpmCacheFolder(unittest.TestCase):
     def test_unknown_prerelease_is_refused(self):
         with self.assertRaises(SystemExit):
             DRIVER.npm_cache_folder("other", "1.0.0-beta")
+
+
+class SdkPath(unittest.TestCase):
+    """The build uses the SDK that @macos_sdk selects, not the xcrun default."""
+
+    def test_absolute_path(self):
+        with tempfile.TemporaryDirectory() as root:
+            info = pathlib.Path(root) / "info.json"
+            info.write_text('{"path": "/sdks/MacOSX26.5.sdk"}')
+            self.assertEqual(DRIVER.sdk_path(info), pathlib.Path("/sdks/MacOSX26.5.sdk"))
+
+    def test_relative_path_is_next_to_the_info_file(self):
+        with tempfile.TemporaryDirectory() as root:
+            info = pathlib.Path(root).resolve() / "info.json"
+            info.write_text('{"path": "sdk"}')
+            self.assertEqual(DRIVER.sdk_path(info), info.parent / "sdk")
+
+    def test_driver_does_not_ask_xcrun(self):
+        self.assertNotIn("xcrun", pathlib.Path(os.environ["BUILD_BUN"]).read_text())
+
+
+class LdShim(unittest.TestCase):
+    """Cargo puts pinned library folders in DYLD_* paths. The host ld must not load the pinned libc++."""
+
+    def run_shim(self, env):
+        with tempfile.TemporaryDirectory() as root:
+            top = pathlib.Path(root)
+            host_ld = top / "host-ld"
+            host_ld.write_text('#!/bin/sh\necho "host $@ [${DYLD_LIBRARY_PATH}${DYLD_FALLBACK_LIBRARY_PATH}${KEEP}]"\n')
+            host_ld.chmod(0o755)
+            DRIVER.write_ld_shim(top, host_ld)
+            return subprocess.run([top / "ld", "-ld_new"], env=env, check=True, capture_output=True, text=True).stdout
+
+    def test_ld_runs_the_host_ld_with_the_same_arguments(self):
+        self.assertEqual(self.run_shim({"KEEP": "k"}), "host -ld_new [k]\n")
+
+    def test_ld_drops_the_dyld_library_paths(self):
+        env = {"DYLD_LIBRARY_PATH": "/pinned/llvm/lib", "DYLD_FALLBACK_LIBRARY_PATH": "/pinned/llvm/lib", "KEEP": "k"}
+        self.assertEqual(self.run_shim(env), "host -ld_new [k]\n")
+
+    def test_missing_host_ld_stops_the_build(self):
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaises(SystemExit):
+                DRIVER.write_ld_shim(pathlib.Path(root), pathlib.Path(root) / "no-ld")
 
 
 if __name__ == "__main__":

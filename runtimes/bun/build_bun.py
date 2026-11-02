@@ -140,6 +140,29 @@ def lay_out_npm(npm, inputs, cache):
         untar(npm / f"{item['name'].replace('/', '__')}@{item['version']}.tgz", target)
 
 
+def sdk_path(info):
+    """Returns the SDK in the @macos_sdk info.json. A relative path is next to the file."""
+    path = pathlib.Path(json.loads(info.read_text())["path"])
+    return path if path.is_absolute() else info.resolve().parent / path
+
+
+def write_ld_shim(tools, host_ld):
+    """Puts `ld` first on PATH. It runs the host ld without the DYLD_* library paths.
+
+    Native Bun links with the Apple ld (-ld_new). Cargo puts pinned library folders in the DYLD_*
+    paths of a Rust link. Then the Xcode 15.4 ld loads the pinned libc++ and stops: no __ZdaPv.
+    """
+    if not os.access(host_ld, os.X_OK):
+        raise SystemExit(f"the host has no {host_ld}")
+    shim = tools / "ld"
+    shim.write_text(
+        "#!/bin/sh\n"
+        "unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_FRAMEWORK_PATH DYLD_FALLBACK_FRAMEWORK_PATH\n"
+        f'exec "{host_ld}" "$@"\n'
+    )
+    shim.chmod(0o755)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-marker", type=pathlib.Path, required=True)
@@ -148,6 +171,7 @@ def main():
     parser.add_argument("--identity", type=pathlib.Path, required=True)
     parser.add_argument("--jobs", type=int, required=True)
     parser.add_argument("--out", type=pathlib.Path, required=True)
+    parser.add_argument("--sysroot-info", type=pathlib.Path, required=True)
     parser.add_argument("--no-build", action="store_true", help="Stop after the layout steps.")
     args = parser.parse_args()
 
@@ -187,6 +211,7 @@ def main():
         (tools / "bun").chmod(0o755)
 
     once(scratch, "tools", identity, lay_out_tools)
+    write_ld_shim(tools, pathlib.Path("/usr/bin/ld"))
     if args.no_build:
         return 0
 
@@ -203,13 +228,8 @@ def main():
         "CARGO_HOME": str(scratch / "cargo-home"),
         "GIT_SHA": REVISION,
         "NO_COLOR": "1",
-        # Rung 6: the host SDK. The tinycc tool step calls clang with no -isysroot.
-        "SDKROOT": subprocess.run(
-            ["/usr/bin/xcrun", "--sdk", "macosx", "--show-sdk-path"],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip(),
+        # Rung 6: the SDK that @macos_sdk selects. The tinycc tool step calls clang with no -isysroot.
+        "SDKROOT": str(sdk_path(args.sysroot_info)),
         "SOURCE_DATE_EPOCH": "0",
         "ZERO_AR_DATE": "1",
     }

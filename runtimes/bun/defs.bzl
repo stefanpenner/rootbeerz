@@ -18,6 +18,7 @@ def _bun_build_impl(ctx):
     args.add("--identity", ctx.file.patch)
     args.add("--jobs", ctx.attr.jobs)
     args.add("--out", binary)
+    args.add("--sysroot-info", ctx.file.sysroot_info)
 
     # This value keeps the work directory across runs. The README states the limit.
     env = {}
@@ -25,11 +26,11 @@ def _bun_build_impl(ctx):
     if scratch:
         env["ROOTBEER_SCRATCH"] = scratch
 
-    singles = [ctx.file._driver, ctx.file.source_marker, ctx.file.inputs_json, ctx.file.stock_bun, ctx.file.patch]
+    singles = [ctx.file._driver, ctx.file.source_marker, ctx.file.inputs_json, ctx.file.stock_bun, ctx.file.patch, ctx.file.sysroot_info]
     ctx.actions.run(
         executable = runtime.interpreter,
         arguments = [args],
-        inputs = depset(singles, transitive = [depset(ctx.files.source), depset(ctx.files.inputs)]),
+        inputs = depset(singles, transitive = [depset(ctx.files.source), depset(ctx.files.inputs), depset(ctx.files.sysroot_files)]),
         tools = runtime.files,
         outputs = [binary],
         env = env,
@@ -50,6 +51,9 @@ bun_build = rule(
         "stock_bun": attr.label(mandatory = True, allow_single_file = True),
         "patch": attr.label(mandatory = True, allow_single_file = True),
         "jobs": attr.int(default = 6),
+        # The SDK that @macos_sdk selects. ld64.lld can read it. The xcrun default can be too new.
+        "sysroot_info": attr.label(default = Label("//toolchain:sysroot_info"), allow_single_file = True),
+        "sysroot_files": attr.label_list(default = [Label("//toolchain:sysroot_files")], allow_files = True),
         "_driver": attr.label(default = Label("//runtimes/bun:build_bun.py"), allow_single_file = True),
     },
     toolchains = [_PY_TOOLCHAIN],
