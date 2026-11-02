@@ -5,8 +5,10 @@
 #   the run in the `pr-approval` environment. A pull request never reaches self-hosted.
 # - macOS jobs always run on GitHub. Only Linux build jobs use CI_RUNS_ON.
 # - runtimes/*/manifest.json gives the runtime x version x OS matrix. A runtime appears when its file lands.
-# - pull requests build the oldest and the newest version of each runtime.
-#   push and manual runs build every version.
+# - pull requests build only the legs that the PR can change (gha.py affected).
+#   A new or changed version builds its own leg. Another runtime file builds the oldest
+#   and the newest version of that runtime. A shared file builds them for each runtime.
+#   A docs or tests change builds no leg. push and manual runs build every version.
 # - a pull request needs one approval. It releases the gated jobs matrix-pr and source-tests-pr.
 #   build-pr needs matrix-pr, so it cannot run before that approval.
 # tests/ci_test.py and tests/runtimes_test.py check these rules.
@@ -61,10 +63,13 @@ jobs:
     timeout-minutes: 5
     outputs:
       legs: ${{ steps.legs.outputs.legs }}
+      count: ${{ steps.legs.outputs.count }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       - id: legs
-        run: python3 .github/workflows/gha.py matrix --scope pr
+        run: python3 .github/workflows/gha.py matrix --scope pr --affected
 
   build:
     if: github.event_name != 'pull_request'
@@ -87,7 +92,7 @@ jobs:
           artifact: ${{ matrix.artifact }}
 
   build-pr:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && needs.matrix-pr.outputs.count != '0'
     needs: matrix-pr
     strategy:
       fail-fast: false

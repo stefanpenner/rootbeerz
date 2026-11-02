@@ -213,10 +213,11 @@ class Matrix(Workspace):
 
     def legs(self, scope, *paths):
         self.assertEqual(self.main("matrix", "--scope", scope, *paths), (0, ""))
-        key, value = self.output.read_text().rstrip("\n").split("=", 1)
-        self.assertEqual(key, "legs")
-        self.assertNotIn("\n", value)
-        return json.loads(value)["include"]
+        lines = self.output.read_text().splitlines()
+        self.assertEqual([line.split("=", 1)[0] for line in lines], ["legs", "count"])
+        include = json.loads(lines[0].split("=", 1)[1])["include"]
+        self.assertEqual(lines[1], f"count={len(include)}")
+        return include
 
     def test_a_leg_carries_what_the_build_needs(self):
         path = self.manifest("deno", [("2", "2.1.0")], ["ubuntu-latest"])
@@ -247,6 +248,112 @@ class Matrix(Workspace):
     def test_an_unknown_scope_is_refused(self):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             gha.main(["matrix", "--scope", "some"])
+
+
+def manifest(runtime, versions, systems=("macos-14",)):
+    return {
+        "runtime": runtime,
+        "os": list(systems),
+        "versions": [{
+            "line": line, "version": version, "target": f"//{runtime}:{line}", "test": f"//{runtime}:t{line}",
+            "system_ca_test": f"//{runtime}:s{line}", "artifact": f"bazel-bin/{runtime}/{line}",
+        } for line, version in versions],
+    }
+
+
+NODE = manifest("node", [("18", "18.0.0"), ("20", "20.0.0"), ("22", "22.0.0")])
+DENO = manifest("deno", [("2", "2.1.0")])
+MODULE = 'bazel_dep(name = "x")\nnode.version(\n    major = "22",\n    sha256 = "a",\n)\nuse_repo(node, "n")\n'
+
+
+class Affected(unittest.TestCase):
+    """A pull request builds only the legs that its changed files can change."""
+
+    def chosen(self, changed, base=(NODE, DENO), head=(NODE, DENO), tags_only=False):
+        picked = gha.affected(changed, gha.legs(list(base), "all"), list(head), tags_only)
+        return [(leg["runtime"], leg["line"]) for leg in picked]
+
+    def test_a_doc_change_builds_nothing(self):
+        self.assertEqual(self.chosen(["README.md", "docs/a.md", "runtimes/jdk/README.md", "tests/ci_test.py"]), [])
+
+    def test_a_file_in_a_runtime_builds_the_pr_legs_of_that_runtime(self):
+        self.assertEqual(self.chosen(["runtimes/deno/patches/0001.patch"]), [("deno", "2")])
+        self.assertEqual(self.chosen(["runtimes/node/build_node.py"]), [("node", "18"), ("node", "22")])
+
+    def test_a_new_version_builds_only_that_leg(self):
+        head = manifest("node", [("18", "18.0.0"), ("20", "20.0.0"), ("22", "22.0.0"), ("24", "24.0.0")])
+        self.assertEqual(self.chosen(["runtimes/node/manifest.json"], head=(head, DENO)), [("node", "24")])
+
+    def test_a_changed_version_builds_only_that_leg(self):
+        head = manifest("node", [("18", "18.0.0"), ("20", "20.0.1"), ("22", "22.0.0")])
+        self.assertEqual(self.chosen(["runtimes/node/manifest.json"], head=(head, DENO)), [("node", "20")])
+
+    def test_a_new_runtime_builds_each_of_its_legs(self):
+        bun = manifest("bun", [("1", "1.0.0")], ["macos-14", "ubuntu-latest"])
+        self.assertEqual(self.chosen(["runtimes/bun/manifest.json"], head=(NODE, DENO, bun)), [("bun", "1"), ("bun", "1")])
+
+    def test_a_file_outside_the_runtimes_builds_the_pr_legs_of_each_runtime(self):
+        for path in ("MODULE.bazel", "MODULE.bazel.lock", ".bazelrc", "toolchain/cc/BUILD.bazel",
+                     ".github/workflows/ci.yml", ".github/workflows/gha.py", ".github/actions/build/action.yml", "x"):
+            with self.subTest(path=path):
+                self.assertEqual(self.chosen([path]), [("node", "18"), ("node", "22"), ("deno", "2")])
+
+    def test_node_tags_in_module_bazel_follow_the_manifest(self):
+        head = manifest("node", [("18", "18.0.0"), ("20", "20.0.0"), ("22", "22.0.0"), ("24", "24.0.0")])
+        changed = ["MODULE.bazel", "MODULE.bazel.lock", "runtimes/node/manifest.json"]
+        self.assertEqual(self.chosen(changed, head=(head, DENO), tags_only=True), [("node", "24")])
+
+    def test_a_lock_change_with_no_module_change_builds_the_pr_legs(self):
+        self.assertEqual(self.chosen(["MODULE.bazel.lock"], tags_only=True), [("node", "18"), ("node", "22"), ("deno", "2")])
+
+    def test_only_node_tags_differ(self):
+        bumped = MODULE.replace('major = "22"', 'major = "24"')
+        added = MODULE.replace("use_repo", 'node.version(\n    major = "26",\n    old_v8 = True,\n)\nuse_repo')
+        self.assertTrue(gha.node_tags_only(MODULE, bumped))
+        self.assertTrue(gha.node_tags_only(MODULE, added))
+        self.assertFalse(gha.node_tags_only(MODULE, MODULE.replace('"x"', '"y"')))
+
+
+class AffectedMatrix(Workspace):
+    """matrix --base asks git for the changed files and the base manifests."""
+
+    def fake_call(self, argv, cwd=None):
+        self.calls.append((list(argv), cwd))
+        files = {
+            "base:runtimes/node/manifest.json": json.dumps(NODE),
+            "base:runtimes/deno/manifest.json": json.dumps(DENO),
+            "base:MODULE.bazel": MODULE,
+        }
+        if argv[:2] == ["git", "diff"]:
+            return "runtimes/deno/build_deno.py\n"
+        if argv[:2] == ["git", "ls-tree"]:
+            return "runtimes/node/manifest.json\nruntimes/node/BUILD.bazel\nruntimes/deno/manifest.json\n"
+        if argv[:2] == ["git", "show"]:
+            return files[argv[2]]
+        raise AssertionError(argv)
+
+    def test_base_selects_the_affected_legs_and_counts_them(self):
+        for runtime in (NODE, DENO):
+            path = self.dir / "runtimes" / runtime["runtime"] / "manifest.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps(runtime))
+        (self.dir / "MODULE.bazel").write_text(MODULE)
+        event = self.dir / "event.json"
+        event.write_text(json.dumps({"pull_request": {"base": {"sha": "base"}}}))
+        patch = mock.patch.dict(os.environ, {"GITHUB_EVENT_PATH": str(event)})
+        patch.start()
+        self.addCleanup(patch.stop)
+        cwd = os.getcwd()
+        os.chdir(self.dir)
+        self.addCleanup(os.chdir, cwd)
+        self.assertEqual(self.main("matrix", "--scope", "pr", "--affected"), (0, ""))
+        lines = dict(line.split("=", 1) for line in self.output.read_text().splitlines())
+        self.assertEqual([leg["runtime"] for leg in json.loads(lines["legs"])["include"]], ["deno"])
+        self.assertEqual(lines["count"], "1")
+        self.assertIn(["git", "diff", "--no-renames", "--name-only", "base", "HEAD"], [argv for argv, _ in self.calls])
+
+    def test_affected_needs_the_pr_scope(self):
+        self.assertEqual(self.main("matrix", "--scope", "all", "--affected")[0], 1)
 
 
 class Collect(Workspace):

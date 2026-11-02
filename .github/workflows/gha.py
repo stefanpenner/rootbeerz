@@ -153,10 +153,65 @@ def legs(manifests, scope):
     ]
 
 
+# A change to one of these files builds no leg. source-tests checks them.
+INERT = re.compile(r".*\.md|docs/.*|tests/.*|LICENSE|\.github/workflows/(?!ci\.yml$|gha\.py$).*")
+RUNTIME_FILE = re.compile(r"runtimes/([^/]+)/(.+)")
+NODE_TAG = re.compile(r"node\.version\([^()]*\)\n?")
+
+
+def node_tags_only(base, head):
+    """True when two MODULE.bazel texts differ only in their node.version tags."""
+    return NODE_TAG.sub("", base) == NODE_TAG.sub("", head)
+
+
+def affected(changed, base_legs, head_manifests, tags_only):
+    """Returns the legs that the changed files can change. It errs toward more legs.
+
+    - A new or changed manifest entry builds its own leg only.
+    - Another file in runtimes/<name>/ builds the PR legs of that runtime.
+    - A file outside runtimes/ builds the PR legs of each runtime, unless it is inert.
+    - MODULE.bazel and its lock follow the manifests when only node.version tags differ.
+    """
+    pr = legs(head_manifests, "pr")
+    module_follows = tags_only and "MODULE.bazel" in changed
+    runtimes = set()
+    for path in changed:
+        match = RUNTIME_FILE.fullmatch(path)
+        if INERT.fullmatch(path) or (module_follows and path in ("MODULE.bazel", "MODULE.bazel.lock")):
+            continue
+        if not match:
+            return pr
+        if match[2] != "manifest.json":
+            runtimes.add(match[1])
+    before = {(leg["runtime"], leg["line"], leg["os"]): leg for leg in base_legs}
+    return [
+        leg for leg in legs(head_manifests, "all")
+        if before.get((leg["runtime"], leg["line"], leg["os"])) != leg or (leg in pr and leg["runtime"] in runtimes)
+    ]
+
+
+def base_legs(base):
+    paths = [p for p in call(["git", "ls-tree", "-r", "--name-only", base, "--", "runtimes"]).split()
+             if re.fullmatch(r"runtimes/[^/]+/manifest\.json", p)]
+    return legs([json.loads(call(["git", "show", f"{base}:{p}"])) for p in paths], "all")
+
+
 def matrix(args):
     paths = args.manifests or sorted(glob.glob("runtimes/*/manifest.json"))
     manifests = [json.loads(Path(p).read_text()) for p in paths]
-    append("GITHUB_OUTPUT", "legs=" + json.dumps({"include": legs(manifests, args.scope)}, separators=(",", ":")))
+    if not args.affected:
+        chosen = legs(manifests, args.scope)
+    elif args.scope != "pr":
+        raise Refused("--affected needs --scope pr. A push run builds each leg for the release.")
+    else:
+        # The event file names the base. A run line never expands ${{ }}, so it cannot inject.
+        base = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())["pull_request"]["base"]["sha"]
+        changed = call(["git", "diff", "--no-renames", "--name-only", base, "HEAD"]).split()
+        tags_only = "MODULE.bazel" in changed and node_tags_only(
+            call(["git", "show", f"{base}:MODULE.bazel"]), Path("MODULE.bazel").read_text())
+        chosen = affected(changed, base_legs(base), manifests, tags_only)
+    append("GITHUB_OUTPUT", "legs=" + json.dumps({"include": chosen}, separators=(",", ":")))
+    append("GITHUB_OUTPUT", f"count={len(chosen)}")
 
 
 # build and test
@@ -244,6 +299,8 @@ def parser():
 
     m = sub.add_parser("matrix", help="Write the CI matrix to GITHUB_OUTPUT as legs.")
     m.add_argument("--scope", choices=["all", "pr"], required=True)
+    m.add_argument("--affected", action="store_true",
+                   help="Keep only the legs that the pull request can change. Reads GITHUB_EVENT_PATH.")
     m.add_argument("manifests", nargs="*", help="Default: runtimes/*/manifest.json.")
     m.set_defaults(run=matrix)
 
