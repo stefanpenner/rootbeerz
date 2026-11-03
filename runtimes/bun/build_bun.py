@@ -161,6 +161,80 @@ def write_ld_shim(tools, host_ld):
         f'exec "{host_ld}" "$@"\n'
     )
     shim.chmod(0o755)
+    return shim
+
+
+def _clang_wrapper(tool):
+    try:
+        return tool.is_file() and not tool.is_symlink() and tool.read_text().startswith("#!/bin/sh\n# rootbeerz clang link\n")
+    except OSError:
+        return False
+
+
+def _stored_clang(llvm_bin, name):
+    """Returns the real compiler for one driver name. A symlink keeps the moved target."""
+    direct = llvm_bin / f"{name}.rootbeerz"
+    if not direct.is_symlink():
+        return direct
+    target = pathlib.Path(os.readlink(direct))
+    if not target.is_absolute():
+        target = direct.parent / target
+    moved = target.parent / f"{target.name}.rootbeerz"
+    return moved if moved.exists() else target
+
+
+def wrap_clang_linkers(llvm_bin, shim):
+    """Adds --ld-path to a clang link. A compile command stays unchanged.
+
+    The Bun driver calls llvm/bin/clang++ by absolute path. That clang then
+    calls the Xcode ld by absolute path, so tools/ld never runs.
+    """
+    if not os.access(shim, os.X_OK):
+        raise SystemExit(f"the ld shim is missing: {shim}")
+    tools = [llvm_bin / name for name in ("clang", "clang++")]
+    for tool in tools:
+        stored = llvm_bin / f"{tool.name}.rootbeerz"
+        if not tool.is_symlink() and not tool.exists() and not stored.exists():
+            raise SystemExit(f"the llvm bin has no {tool}")
+    # Move a real compiler before a symlink. A moved target makes the link dangle.
+    for tool in [item for item in tools if not item.is_symlink()]:
+        real = llvm_bin / f"{tool.name}.rootbeerz"
+        if real.exists() or _clang_wrapper(tool):
+            continue
+        tool.rename(real)
+    for tool in [item for item in tools if item.is_symlink()]:
+        real = llvm_bin / f"{tool.name}.rootbeerz"
+        if real.exists():
+            continue
+        real.symlink_to(os.readlink(tool))
+        tool.unlink()
+    for tool in tools:
+        _write_clang_wrapper(tool, _stored_clang(llvm_bin, tool.name), shim)
+
+
+def _write_clang_wrapper(tool, real, shim):
+    if tool.is_symlink() or tool.exists():
+        tool.unlink()
+    tool.write_text(
+        "#!/bin/sh\n"
+        "# rootbeerz clang link\n"
+        f'real="{real}"\n'
+        f'shim="{shim}"\n'
+        "link=1\n"
+        'for arg in "$@"; do\n'
+        '  case $arg in\n'
+        "    -c|-E|-S|-M|-MM|-fsyntax-only|--version|-dumpversion|--help|-dumpmachine)\n"
+        "      link=0\n"
+        "      break\n"
+        "      ;;\n"
+        "  esac\n"
+        "done\n"
+        'if [ "$link" -eq 1 ]; then\n'
+        '  exec "$real" --ld-path="$shim" "$@"\n'
+        "fi\n"
+        'exec "$real" "$@"\n'
+    )
+    tool.chmod(0o755)
 
 
 def main():
@@ -211,7 +285,8 @@ def main():
         (tools / "bun").chmod(0o755)
 
     once(scratch, "tools", identity, lay_out_tools)
-    write_ld_shim(tools, pathlib.Path("/usr/bin/ld"))
+    shim = write_ld_shim(tools, pathlib.Path("/usr/bin/ld"))
+    wrap_clang_linkers(scratch / "llvm" / "bin", shim)
     if args.no_build:
         return 0
 

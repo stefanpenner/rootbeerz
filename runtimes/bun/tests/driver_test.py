@@ -85,6 +85,47 @@ class LdShim(unittest.TestCase):
         env = {"DYLD_LIBRARY_PATH": "/pinned/llvm/lib", "DYLD_FALLBACK_LIBRARY_PATH": "/pinned/llvm/lib", "KEEP": "k"}
         self.assertEqual(self.run_shim(env), "host -ld_new [k]\n")
 
+    def test_clang_link_uses_the_ld_shim(self):
+        # llvm/bin/clang++ is an absolute path. A PATH entry named ld does not run.
+        with tempfile.TemporaryDirectory() as root:
+            top = pathlib.Path(root)
+            llvm = top / "llvm-bin"
+            llvm.mkdir()
+            for name in ("clang", "clang++"):
+                compiler = llvm / name
+                compiler.write_text('#!/bin/sh\necho "$@"\n')
+                compiler.chmod(0o755)
+            host = top / "host-ld"
+            host.write_text("#!/bin/sh\necho host\n")
+            host.chmod(0o755)
+            DRIVER.write_ld_shim(top, host)
+            DRIVER.wrap_clang_linkers(llvm, top / "ld")
+            DRIVER.wrap_clang_linkers(llvm, top / "ld")
+            link = subprocess.run(
+                [llvm / "clang++", "a.o", "-o", "a"], check=True, capture_output=True, text=True).stdout
+            compiled = subprocess.run(
+                [llvm / "clang++", "-c", "a.c"], check=True, capture_output=True, text=True).stdout
+        self.assertEqual(link.split(), [f"--ld-path={top / 'ld'}", "a.o", "-o", "a"])
+        self.assertEqual(compiled.split(), ["-c", "a.c"])
+
+    def test_clang_symlink_keeps_one_real_compiler(self):
+        with tempfile.TemporaryDirectory() as root:
+            top = pathlib.Path(root)
+            llvm = top / "llvm-bin"
+            llvm.mkdir()
+            compiler = llvm / "clang"
+            compiler.write_text('#!/bin/sh\necho "$@"\n')
+            compiler.chmod(0o755)
+            (llvm / "clang++").symlink_to("clang")
+            host = top / "host-ld"
+            host.write_text("#!/bin/sh\necho host\n")
+            host.chmod(0o755)
+            DRIVER.write_ld_shim(top, host)
+            DRIVER.wrap_clang_linkers(llvm, top / "ld")
+            link = subprocess.run(
+                [llvm / "clang++", "a.o", "-o", "a"], check=True, capture_output=True, text=True).stdout
+        self.assertEqual(link.split(), [f"--ld-path={top / 'ld'}", "a.o", "-o", "a"])
+
     def test_missing_host_ld_stops_the_build(self):
         with tempfile.TemporaryDirectory() as root:
             with self.assertRaises(SystemExit):
