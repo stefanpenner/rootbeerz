@@ -38,7 +38,7 @@ def matrix(scope, paths):
         command = [sys.executable, GHA, "matrix", "--scope", scope, *map(str, paths)]
         env = {**os.environ, "GITHUB_OUTPUT": str(output)}
         subprocess.run(command, check=True, capture_output=True, text=True, env=env)
-        key, value = output.read_text().rstrip("\n").split("=", 1)
+        key, value = output.read_text().splitlines()[0].split("=", 1)
         assert key == "legs", key
         return json.loads(value)
 

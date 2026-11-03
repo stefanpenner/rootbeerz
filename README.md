@@ -168,8 +168,12 @@ Each CI run also keeps its artifacts. Open the run on the Actions tab to downloa
 
 ## CI
 
-- A push to `main` or a manual run builds Node 16, 18, 20, 22, 24, and 26 on macOS 14 and Linux.
-  A pull request builds only the oldest and the newest line.
+- A push to `main` or a manual run builds every version on macOS 14 and Linux.
+  A pull request builds only the legs its files can change.
+  A manifest edit builds the changed leg.
+  Another file in one runtime builds the oldest line and the newest line of that runtime.
+  A shared file builds those lines for each runtime.
+  A docs change or a tests change builds no leg.
   Each build job runs the tests of its line and the `system_ca` test, then uploads the archive.
 - CI reads the build matrix from `runtimes/*/manifest.json`. A new manifest adds its runtime to CI.
   `tests/runtimes_test.py` checks the manifests.

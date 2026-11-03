@@ -23,7 +23,7 @@ LINUX_USES_THE_VARIABLE = (
     "fromJSON(vars.CI_RUNS_ON || '\"ubuntu-latest\"') || matrix.os }}"
 )
 # These jobs turn runtimes/*/manifest.json into the build matrix. They run gha.py matrix and no build.
-MATRIX_JOBS = {"matrix": "all", "matrix-pr": "pr"}
+MATRIX_JOBS = {"matrix": "all", "matrix-pr": "pr --affected"}
 
 
 def triggers():
@@ -43,6 +43,16 @@ def field(text, name):
     return match.group(1).strip() if match else None
 
 
+# build-pr skips an empty matrix. GitHub fails a job whose matrix has no leg.
+NO_EMPTY_MATRIX = " && needs.matrix-pr.outputs.count != '0'"
+
+
+def event(text):
+    """Returns the event gate of a job. The empty-matrix guard does not change the event."""
+    gate = field(text, "if")
+    return ONLY_PR if gate == ONLY_PR + NO_EMPTY_MATRIX else gate
+
+
 class Triggers(unittest.TestCase):
     def test_only_the_allowed_triggers(self):
         self.assertEqual(triggers(), {"push", "workflow_dispatch", "pull_request"})
@@ -59,11 +69,11 @@ class Triggers(unittest.TestCase):
 
 class PullRequestJobs(unittest.TestCase):
     def test_there_is_a_pull_request_job(self):
-        self.assertTrue([n for n, t in jobs().items() if field(t, "if") == ONLY_PR])
+        self.assertTrue([n for n, t in jobs().items() if event(t) == ONLY_PR])
 
     def test_pull_request_jobs_wait_for_approval(self):
         # A job is gated, or it needs a gated job. One approval then releases the run.
-        pr = {n: t for n, t in jobs().items() if field(t, "if") == ONLY_PR}
+        pr = {n: t for n, t in jobs().items() if event(t) == ONLY_PR}
         gated = {n for n, t in pr.items() if field(t, "environment") == "pr-approval"}
         self.assertTrue(gated)
         for name, text in pr.items():
@@ -78,7 +88,7 @@ class PullRequestJobs(unittest.TestCase):
 
     def test_pull_request_jobs_use_a_hosted_runner(self):
         for name, text in jobs().items():
-            if field(text, "if") == ONLY_PR:
+            if event(text) == ONLY_PR:
                 runs_on = field(text, "runs-on")
                 if runs_on == "${{ matrix.os }}":
                     # The manifests name the systems. runtimes_test proves that the
@@ -89,7 +99,7 @@ class PullRequestJobs(unittest.TestCase):
 
     def test_pull_request_jobs_never_read_the_runner_variable(self):
         for name, text in jobs().items():
-            if field(text, "if") == ONLY_PR:
+            if event(text) == ONLY_PR:
                 self.assertNotIn("vars.", text, name)
                 self.assertNotIn("self-hosted", text, name)
 
@@ -97,16 +107,16 @@ class PullRequestJobs(unittest.TestCase):
 class PushJobs(unittest.TestCase):
     def test_every_job_is_gated_on_the_event(self):
         for name, text in jobs().items():
-            self.assertIn(field(text, "if"), {ONLY_PR, NOT_PR}, f"{name} runs on every event")
+            self.assertIn(event(text), {ONLY_PR, NOT_PR}, f"{name} runs on every event")
 
     def test_only_push_jobs_read_the_runner_variable(self):
         for name, text in jobs().items():
             if "vars." in text or "self-hosted" in text:
-                self.assertEqual(field(text, "if"), NOT_PR, name)
+                self.assertEqual(event(text), NOT_PR, name)
                 self.assertNotIn("environment", text, name)
 
     def test_push_jobs_use_the_runner_variable_with_a_hosted_fallback(self):
-        selected = {n: t for n, t in jobs().items() if field(t, "if") == NOT_PR}
+        selected = {n: t for n, t in jobs().items() if event(t) == NOT_PR}
         self.assertTrue(selected)
         for name, text in selected.items():
             runs_on = field(text, "runs-on")
@@ -158,12 +168,12 @@ class Build(unittest.TestCase):
             )
 
     def test_both_events_have_a_build_matrix(self):
-        events = {field(t, "if") for t in self.build_jobs().values()}
+        events = {event(t) for t in self.build_jobs().values()}
         self.assertEqual(events, {ONLY_PR, NOT_PR})
 
     def test_each_build_job_reads_the_matrix_of_its_event(self):
         for name, text in self.build_jobs().items():
-            source = "matrix-pr" if field(text, "if") == ONLY_PR else "matrix"
+            source = "matrix-pr" if event(text) == ONLY_PR else "matrix"
             self.assertIn(f"      matrix: ${{{{ fromJSON(needs.{source}.outputs.legs) }}}}\n", text, name)
 
     def test_build_jobs_use_the_build_action(self):
@@ -176,8 +186,16 @@ class Build(unittest.TestCase):
         # One approval must release every leg. A leg never waits for another leg.
         # A pull request has two approvals: first the matrix job, then the legs.
         for name, text in self.build_jobs().items():
-            source = "matrix-pr" if field(text, "if") == ONLY_PR else "matrix"
+            source = "matrix-pr" if event(text) == ONLY_PR else "matrix"
             self.assertEqual(field(text, "needs"), source, name)
+
+    def test_a_pull_request_builds_only_the_affected_legs(self):
+        # gha.py diffs the PR against its base. It needs the full history and gives a leg count.
+        matrix_pr = jobs()["matrix-pr"]
+        self.assertIn("        with:\n          fetch-depth: 0\n", matrix_pr)
+        self.assertIn("      count: ${{ steps.legs.outputs.count }}\n", matrix_pr)
+        self.assertEqual(field(jobs()["build-pr"], "if"), ONLY_PR + NO_EMPTY_MATRIX)
+        self.assertEqual(field(jobs()["build"], "if"), NOT_PR)
 
     def test_build_jobs_keep_going_when_one_leg_fails(self):
         for name, text in self.build_jobs().items():
