@@ -93,9 +93,9 @@ def node_tests(major, version):
     # The stock binary is a download, so these checks need no Node build.
     py_test(
         name = "stock_teeth_%d_test" % major,
-        srcs = ["stock_teeth_test.py", "hermetic_test.py"],
+        srcs = ["stock_teeth_test.py"],
         main = "stock_teeth_test.py",
-        deps = ["//trust/testing:trustlib"],
+        deps = [":hermetic_lib", "//trust/testing:trustlib"],
         data = stock_data,
         env = hermetic_env | {"ROOTBEER_NODE": "$(rootpath %s)" % stock},
         size = "medium",

@@ -1,6 +1,15 @@
 load("@node_versions//:versions.bzl", "NODE_VERSIONS")
+load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 load(":defs.bzl", "node_tests")
+
+# stock_teeth imports hermetic_test. A second src is not on the module path.
+py_library(
+    name = "hermetic_lib",
+    srcs = ["hermetic_test.py"],
+    imports = ["."],
+    deps = ["//trust/testing:trustlib"],
+)
 
 [node_tests(major, version) for major, version in NODE_VERSIONS.items()]
 
