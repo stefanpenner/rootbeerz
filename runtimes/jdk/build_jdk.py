@@ -102,6 +102,8 @@ def configure_flags(boot_jdk, sysroot, empty_cacerts, jobs, version, scratch, ll
         "--with-jvm-variants=server",
         "--with-native-debug-symbols=none",
         "--disable-warnings-as-errors",
+        # The macOS sandbox blocks the javac server bind.
+        "--disable-javac-server",
         "--with-version-pre=",
         f"--with-version-build={build}",
         "--with-version-opt=rootbeerz",
