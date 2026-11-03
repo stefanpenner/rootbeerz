@@ -175,6 +175,23 @@ def changed_node_lines(base, head):
     return {line for line in before.keys() | after.keys() if before.get(line) != after.get(line)}
 
 
+def change_kind(path, module_follows):
+    """Returns the kind of one changed path, and the runtime name when it has one."""
+    if INERT.fullmatch(path) or (module_follows and path in ("MODULE.bazel", "MODULE.bazel.lock")):
+        return "inert", None
+    match = RUNTIME_FILE.fullmatch(path)
+    if not match:
+        return "shared", None
+    if match[2] == "manifest.json":
+        return "manifest", match[1]
+    return "runtime", match[1]
+
+
+def changed_manifest_leg(leg, before):
+    """A manifest edit builds the leg whose record changed."""
+    return before.get((leg["runtime"], leg["line"], leg["os"])) != leg
+
+
 def affected(changed, base_legs, head_manifests, node_lines):
     """Returns the legs that the changed files can change. It errs toward more legs.
 
@@ -188,17 +205,15 @@ def affected(changed, base_legs, head_manifests, node_lines):
     tagged = node_lines if module_follows else set()
     runtimes = set()
     for path in changed:
-        match = RUNTIME_FILE.fullmatch(path)
-        if INERT.fullmatch(path) or (module_follows and path in ("MODULE.bazel", "MODULE.bazel.lock")):
-            continue
-        if not match:
+        kind, runtime = change_kind(path, module_follows)
+        if kind == "shared":
             return pr
-        if match[2] != "manifest.json":
-            runtimes.add(match[1])
+        if kind == "runtime":
+            runtimes.add(runtime)
     before = {(leg["runtime"], leg["line"], leg["os"]): leg for leg in base_legs}
     return [
         leg for leg in legs(head_manifests, "all")
-        if before.get((leg["runtime"], leg["line"], leg["os"])) != leg
+        if changed_manifest_leg(leg, before)
         or (leg in pr and leg["runtime"] in runtimes)
         or (leg["runtime"] == "node" and leg["line"] in tagged)
     ]
