@@ -140,6 +140,41 @@ def lay_out_npm(npm, inputs, cache):
         untar(npm / f"{item['name'].replace('/', '__')}@{item['version']}.tgz", target)
 
 
+def input_files(inputs_json):
+    """Returns the files directory next to the inputs json."""
+    files = inputs_json.resolve().parent / "files"
+    if files.is_dir():
+        return files
+    return pathlib.Path(os.path.dirname(inputs_json)) / "files"
+
+
+def ninja_tag(inputs):
+    """Returns the release segment of the ninja archive URL."""
+    return next(item["url"].split("/")[-2] for item in inputs["archives"] if item["name"] == "ninja")
+
+
+def build_env(scratch, tools, cache, sdk):
+    """Returns the environment for scripts/build.ts. tools is first on PATH."""
+    return {
+        "PATH": os.pathsep.join([str(tools), str(scratch / "cmake/CMake.app/Contents/bin"), HOST_PATH]),
+        "HOME": str(scratch / "home"),
+        "TMPDIR": str(scratch / "tmp"),
+        "BUN_BUILD_CACHE_DIR": str(cache),
+        "BUN_BUILD_PREFETCH_DIR": str(scratch / "prefetch"),
+        "BUN_INSTALL": str(scratch / "bun-install"),
+        "BUN_INSTALL_CACHE_DIR": str(scratch / "npm-cache"),
+        "BUN_TOOLCHAIN_LLVM": str(scratch / "llvm"),
+        "BUN_TOOLCHAIN_RUST": str(scratch / "rust"),
+        "CARGO_HOME": str(scratch / "cargo-home"),
+        "GIT_SHA": REVISION,
+        "NO_COLOR": "1",
+        # Rung 6: the SDK that @macos_sdk selects. The tinycc tool step calls clang with no -isysroot.
+        "SDKROOT": sdk,
+        "SOURCE_DATE_EPOCH": "0",
+        "ZERO_AR_DATE": "1",
+    }
+
+
 def sdk_path(info):
     """Returns the SDK in the @macos_sdk info.json. A relative path is next to the file."""
     path = pathlib.Path(json.loads(info.read_text())["path"])
@@ -157,10 +192,113 @@ def write_ld_shim(tools, host_ld):
     shim = tools / "ld"
     shim.write_text(
         "#!/bin/sh\n"
+        "# rootbeerz ld\n"
         "unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_FRAMEWORK_PATH DYLD_FALLBACK_FRAMEWORK_PATH\n"
         f'exec "{host_ld}" "$@"\n'
     )
     shim.chmod(0o755)
+    return shim
+
+
+def _ld_shim(tool):
+    try:
+        return tool.is_file() and not tool.is_symlink() and tool.read_text().startswith("#!/bin/sh\n# rootbeerz ld\n")
+    except OSError:
+        return False
+
+
+def install_ld_beside_clang(llvm_bin, shim):
+    """Copies the ld shim next to clang.
+
+    Darwin clang searches its own directory for ld before PATH.
+    A link that does not pass --ld-path still runs this shim.
+    """
+    neighbor = llvm_bin / "ld"
+    if _ld_shim(neighbor):
+        return
+    stored = llvm_bin / "ld.rootbeerz"
+    if neighbor.is_symlink() or neighbor.exists():
+        if not stored.exists():
+            neighbor.rename(stored)
+        else:
+            neighbor.unlink()
+    neighbor.write_text(shim.read_text())
+    neighbor.chmod(0o755)
+
+
+def _clang_wrapper(tool):
+    try:
+        return tool.is_file() and not tool.is_symlink() and tool.read_text().startswith("#!/bin/sh\n# rootbeerz clang link\n")
+    except OSError:
+        return False
+
+
+def _stored_clang(llvm_bin, name):
+    """Returns the real compiler for one driver name. A symlink keeps the moved target."""
+    direct = llvm_bin / f"{name}.rootbeerz"
+    if not direct.is_symlink():
+        return direct
+    target = pathlib.Path(os.readlink(direct))
+    if not target.is_absolute():
+        target = direct.parent / target
+    moved = target.parent / f"{target.name}.rootbeerz"
+    return moved if moved.exists() else target
+
+
+def wrap_clang_linkers(llvm_bin, shim):
+    """Points a clang link at the ld shim. A compile command stays unchanged.
+
+    The Bun driver calls llvm/bin/clang++ by absolute path. Darwin clang
+    then looks for ld in that same directory. The shim is copied there.
+    A link also passes --ld-path.
+    """
+    if not os.access(shim, os.X_OK):
+        raise SystemExit(f"the ld shim is missing: {shim}")
+    install_ld_beside_clang(llvm_bin, shim)
+    tools = [llvm_bin / name for name in ("clang", "clang++")]
+    for tool in tools:
+        stored = llvm_bin / f"{tool.name}.rootbeerz"
+        if not tool.is_symlink() and not tool.exists() and not stored.exists():
+            raise SystemExit(f"the llvm bin has no {tool}")
+    # Move a real compiler before a symlink. A moved target makes the link dangle.
+    for tool in [item for item in tools if not item.is_symlink()]:
+        real = llvm_bin / f"{tool.name}.rootbeerz"
+        if real.exists() or _clang_wrapper(tool):
+            continue
+        tool.rename(real)
+    for tool in [item for item in tools if item.is_symlink()]:
+        real = llvm_bin / f"{tool.name}.rootbeerz"
+        if real.exists():
+            continue
+        real.symlink_to(os.readlink(tool))
+        tool.unlink()
+    for tool in tools:
+        _write_clang_wrapper(tool, _stored_clang(llvm_bin, tool.name), shim)
+
+
+def _write_clang_wrapper(tool, real, shim):
+    if tool.is_symlink() or tool.exists():
+        tool.unlink()
+    tool.write_text(
+        "#!/bin/sh\n"
+        "# rootbeerz clang link\n"
+        f'real="{real}"\n'
+        f'shim="{shim}"\n'
+        "link=1\n"
+        'for arg in "$@"; do\n'
+        '  case $arg in\n'
+        "    -c|-E|-S|-M|-MM|-fsyntax-only|--version|-dumpversion|--help|-dumpmachine)\n"
+        "      link=0\n"
+        "      break\n"
+        "      ;;\n"
+        "  esac\n"
+        "done\n"
+        'if [ "$link" -eq 1 ]; then\n'
+        '  exec "$real" --ld-path="$shim" "$@"\n'
+        "fi\n"
+        'exec "$real" "$@"\n'
+    )
+    tool.chmod(0o755)
 
 
 def main():
@@ -185,16 +323,14 @@ def main():
         raise SystemExit(f"host cargo configuration would change this build: {leaks}")
     pins = args.inputs_json.read_bytes()
     inputs = json.loads(pins)
-    files = args.inputs_json.resolve().parent / "files"
-    if not files.is_dir():
-        files = pathlib.Path(os.path.dirname(args.inputs_json)) / "files"
+    files = input_files(args.inputs_json)
     identity = hashlib.sha256(pins + args.identity.read_bytes()).hexdigest()
 
     src = scratch / "src"
     cache = scratch / "build-cache"
     archives = files / "archives"
     tools = scratch / "tools"
-    tag = next(i["url"].split("/")[-2] for i in inputs["archives"] if i["name"] == "ninja")
+    tag = ninja_tag(inputs)
 
     once(scratch, "source", identity, lambda: copy_source(args.source_marker.parent, src))
     once(scratch, "llvm", identity, lambda: (reset(scratch / "llvm"), untar(one_file(archives / "llvm"), scratch / "llvm")))
@@ -211,28 +347,12 @@ def main():
         (tools / "bun").chmod(0o755)
 
     once(scratch, "tools", identity, lay_out_tools)
-    write_ld_shim(tools, pathlib.Path("/usr/bin/ld"))
+    shim = write_ld_shim(tools, pathlib.Path("/usr/bin/ld"))
+    wrap_clang_linkers(scratch / "llvm" / "bin", shim)
     if args.no_build:
         return 0
 
-    env = {
-        "PATH": os.pathsep.join([str(tools), str(scratch / "cmake/CMake.app/Contents/bin"), HOST_PATH]),
-        "HOME": str(scratch / "home"),
-        "TMPDIR": str(scratch / "tmp"),
-        "BUN_BUILD_CACHE_DIR": str(cache),
-        "BUN_BUILD_PREFETCH_DIR": str(scratch / "prefetch"),
-        "BUN_INSTALL": str(scratch / "bun-install"),
-        "BUN_INSTALL_CACHE_DIR": str(scratch / "npm-cache"),
-        "BUN_TOOLCHAIN_LLVM": str(scratch / "llvm"),
-        "BUN_TOOLCHAIN_RUST": str(scratch / "rust"),
-        "CARGO_HOME": str(scratch / "cargo-home"),
-        "GIT_SHA": REVISION,
-        "NO_COLOR": "1",
-        # Rung 6: the SDK that @macos_sdk selects. The tinycc tool step calls clang with no -isysroot.
-        "SDKROOT": str(sdk_path(args.sysroot_info)),
-        "SOURCE_DATE_EPOCH": "0",
-        "ZERO_AR_DATE": "1",
-    }
+    env = build_env(scratch, tools, cache, str(sdk_path(args.sysroot_info)))
     for name in ("HOME", "TMPDIR"):
         pathlib.Path(env[name]).mkdir(parents=True, exist_ok=True)
     subprocess.run(

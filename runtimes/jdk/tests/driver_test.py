@@ -49,6 +49,10 @@ class Configure(unittest.TestCase):
     def test_job_limit(self):
         self.assertIn("--with-jobs=6", self.flags)
 
+    def test_javac_server_is_off(self):
+        # The macOS sandbox blocks the server bind. Javac runs in this process.
+        self.assertIn("--disable-javac-server", self.flags)
+
     def test_selects_pinned_boot_jdk_and_sysroot(self):
         self.assertIn("--with-boot-jdk=/boot", self.flags)
         self.assertIn("--with-sysroot=/sdk", self.flags)
