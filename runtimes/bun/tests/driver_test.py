@@ -145,6 +145,43 @@ class LdShim(unittest.TestCase):
                 [llvm / "clang++", "a.o", "-o", "a"], check=True, capture_output=True, text=True).stdout
         self.assertEqual(link.split(), [f"--ld-path={top / 'ld'}", "a.o", "-o", "a"])
 
+    def test_clang_finds_the_ld_shim_beside_itself(self):
+        # Darwin clang searches its own directory for ld before xcrun.
+        # A link line that contains -lc is still a link.
+        with tempfile.TemporaryDirectory() as root:
+            top = pathlib.Path(root)
+            llvm = top / "llvm-bin"
+            llvm.mkdir()
+            for name in ("clang", "clang++"):
+                compiler = llvm / name
+                compiler.write_text('#!/bin/sh\necho "$@"\n')
+                compiler.chmod(0o755)
+            old = llvm / "ld"
+            old.write_text("#!/bin/sh\necho old-ld\n")
+            old.chmod(0o755)
+            host = top / "host-ld"
+            host.write_text(
+                '#!/bin/sh\necho "host $@ [${DYLD_LIBRARY_PATH}${DYLD_FALLBACK_LIBRARY_PATH}]"\n'
+            )
+            host.chmod(0o755)
+            DRIVER.write_ld_shim(top, host)
+            DRIVER.wrap_clang_linkers(llvm, top / "ld")
+            DRIVER.wrap_clang_linkers(llvm, top / "ld")
+            link = subprocess.run(
+                [llvm / "clang++", "a.o", "-lc", "-o", "a"],
+                check=True, capture_output=True, text=True).stdout
+            neighbor = subprocess.run(
+                [llvm / "ld", "-ld_new"],
+                env={
+                    "DYLD_LIBRARY_PATH": "/pinned/llvm/lib",
+                    "DYLD_FALLBACK_LIBRARY_PATH": "/pinned/llvm/lib",
+                },
+                check=True, capture_output=True, text=True).stdout
+            saved = (llvm / "ld.rootbeerz").read_text()
+        self.assertEqual(link.split(), [f"--ld-path={top / 'ld'}", "a.o", "-lc", "-o", "a"])
+        self.assertEqual(neighbor, "host -ld_new []\n")
+        self.assertEqual(saved, "#!/bin/sh\necho old-ld\n")
+
     def test_missing_host_ld_stops_the_build(self):
         with tempfile.TemporaryDirectory() as root:
             with self.assertRaises(SystemExit):

@@ -192,11 +192,38 @@ def write_ld_shim(tools, host_ld):
     shim = tools / "ld"
     shim.write_text(
         "#!/bin/sh\n"
+        "# rootbeerz ld\n"
         "unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_FRAMEWORK_PATH DYLD_FALLBACK_FRAMEWORK_PATH\n"
         f'exec "{host_ld}" "$@"\n'
     )
     shim.chmod(0o755)
     return shim
+
+
+def _ld_shim(tool):
+    try:
+        return tool.is_file() and not tool.is_symlink() and tool.read_text().startswith("#!/bin/sh\n# rootbeerz ld\n")
+    except OSError:
+        return False
+
+
+def install_ld_beside_clang(llvm_bin, shim):
+    """Copies the ld shim next to clang.
+
+    Darwin clang searches its own directory for ld before PATH.
+    A link that does not pass --ld-path still runs this shim.
+    """
+    neighbor = llvm_bin / "ld"
+    if _ld_shim(neighbor):
+        return
+    stored = llvm_bin / "ld.rootbeerz"
+    if neighbor.is_symlink() or neighbor.exists():
+        if not stored.exists():
+            neighbor.rename(stored)
+        else:
+            neighbor.unlink()
+    neighbor.write_text(shim.read_text())
+    neighbor.chmod(0o755)
 
 
 def _clang_wrapper(tool):
@@ -219,13 +246,15 @@ def _stored_clang(llvm_bin, name):
 
 
 def wrap_clang_linkers(llvm_bin, shim):
-    """Adds --ld-path to a clang link. A compile command stays unchanged.
+    """Points a clang link at the ld shim. A compile command stays unchanged.
 
-    The Bun driver calls llvm/bin/clang++ by absolute path. That clang then
-    calls the Xcode ld by absolute path, so tools/ld never runs.
+    The Bun driver calls llvm/bin/clang++ by absolute path. Darwin clang
+    then looks for ld in that same directory. The shim is copied there.
+    A link also passes --ld-path.
     """
     if not os.access(shim, os.X_OK):
         raise SystemExit(f"the ld shim is missing: {shim}")
+    install_ld_beside_clang(llvm_bin, shim)
     tools = [llvm_bin / name for name in ("clang", "clang++")]
     for tool in tools:
         stored = llvm_bin / f"{tool.name}.rootbeerz"
