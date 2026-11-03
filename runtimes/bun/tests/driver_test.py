@@ -65,6 +65,25 @@ class SdkPath(unittest.TestCase):
     def test_driver_does_not_ask_xcrun(self):
         self.assertNotIn("xcrun", pathlib.Path(os.environ["BUILD_BUN"]).read_text())
 
+    def test_input_files_is_the_sibling_files_dir(self):
+        with tempfile.TemporaryDirectory() as root:
+            top = pathlib.Path(root).resolve()
+            (top / "files").mkdir()
+            info = top / "inputs_1.json"
+            info.write_text("{}")
+            self.assertEqual(DRIVER.input_files(info), top / "files")
+
+    def test_ninja_tag_is_the_release_segment(self):
+        inputs = {"archives": [{"name": "ninja", "url": "https://example/v1.12.1/ninja.tar.gz"}]}
+        self.assertEqual(DRIVER.ninja_tag(inputs), "v1.12.1")
+
+    def test_build_env_puts_the_tools_dir_first(self):
+        env = DRIVER.build_env(pathlib.Path("/scratch"), pathlib.Path("/tools"), pathlib.Path("/cache"), "/sdk")
+        self.assertTrue(env["PATH"].startswith("/tools" + os.pathsep), env["PATH"])
+        self.assertEqual(env["SDKROOT"], "/sdk")
+        self.assertEqual(env["BUN_TOOLCHAIN_LLVM"], "/scratch/llvm")
+        self.assertEqual(env["SOURCE_DATE_EPOCH"], "0")
+
 
 class LdShim(unittest.TestCase):
     """Cargo puts pinned library folders in DYLD_* paths. The host ld must not load the pinned libc++."""

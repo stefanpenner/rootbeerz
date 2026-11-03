@@ -140,6 +140,41 @@ def lay_out_npm(npm, inputs, cache):
         untar(npm / f"{item['name'].replace('/', '__')}@{item['version']}.tgz", target)
 
 
+def input_files(inputs_json):
+    """Returns the files directory next to the inputs json."""
+    files = inputs_json.resolve().parent / "files"
+    if files.is_dir():
+        return files
+    return pathlib.Path(os.path.dirname(inputs_json)) / "files"
+
+
+def ninja_tag(inputs):
+    """Returns the release segment of the ninja archive URL."""
+    return next(item["url"].split("/")[-2] for item in inputs["archives"] if item["name"] == "ninja")
+
+
+def build_env(scratch, tools, cache, sdk):
+    """Returns the environment for scripts/build.ts. tools is first on PATH."""
+    return {
+        "PATH": os.pathsep.join([str(tools), str(scratch / "cmake/CMake.app/Contents/bin"), HOST_PATH]),
+        "HOME": str(scratch / "home"),
+        "TMPDIR": str(scratch / "tmp"),
+        "BUN_BUILD_CACHE_DIR": str(cache),
+        "BUN_BUILD_PREFETCH_DIR": str(scratch / "prefetch"),
+        "BUN_INSTALL": str(scratch / "bun-install"),
+        "BUN_INSTALL_CACHE_DIR": str(scratch / "npm-cache"),
+        "BUN_TOOLCHAIN_LLVM": str(scratch / "llvm"),
+        "BUN_TOOLCHAIN_RUST": str(scratch / "rust"),
+        "CARGO_HOME": str(scratch / "cargo-home"),
+        "GIT_SHA": REVISION,
+        "NO_COLOR": "1",
+        # Rung 6: the SDK that @macos_sdk selects. The tinycc tool step calls clang with no -isysroot.
+        "SDKROOT": sdk,
+        "SOURCE_DATE_EPOCH": "0",
+        "ZERO_AR_DATE": "1",
+    }
+
+
 def sdk_path(info):
     """Returns the SDK in the @macos_sdk info.json. A relative path is next to the file."""
     path = pathlib.Path(json.loads(info.read_text())["path"])
@@ -259,16 +294,14 @@ def main():
         raise SystemExit(f"host cargo configuration would change this build: {leaks}")
     pins = args.inputs_json.read_bytes()
     inputs = json.loads(pins)
-    files = args.inputs_json.resolve().parent / "files"
-    if not files.is_dir():
-        files = pathlib.Path(os.path.dirname(args.inputs_json)) / "files"
+    files = input_files(args.inputs_json)
     identity = hashlib.sha256(pins + args.identity.read_bytes()).hexdigest()
 
     src = scratch / "src"
     cache = scratch / "build-cache"
     archives = files / "archives"
     tools = scratch / "tools"
-    tag = next(i["url"].split("/")[-2] for i in inputs["archives"] if i["name"] == "ninja")
+    tag = ninja_tag(inputs)
 
     once(scratch, "source", identity, lambda: copy_source(args.source_marker.parent, src))
     once(scratch, "llvm", identity, lambda: (reset(scratch / "llvm"), untar(one_file(archives / "llvm"), scratch / "llvm")))
@@ -290,24 +323,7 @@ def main():
     if args.no_build:
         return 0
 
-    env = {
-        "PATH": os.pathsep.join([str(tools), str(scratch / "cmake/CMake.app/Contents/bin"), HOST_PATH]),
-        "HOME": str(scratch / "home"),
-        "TMPDIR": str(scratch / "tmp"),
-        "BUN_BUILD_CACHE_DIR": str(cache),
-        "BUN_BUILD_PREFETCH_DIR": str(scratch / "prefetch"),
-        "BUN_INSTALL": str(scratch / "bun-install"),
-        "BUN_INSTALL_CACHE_DIR": str(scratch / "npm-cache"),
-        "BUN_TOOLCHAIN_LLVM": str(scratch / "llvm"),
-        "BUN_TOOLCHAIN_RUST": str(scratch / "rust"),
-        "CARGO_HOME": str(scratch / "cargo-home"),
-        "GIT_SHA": REVISION,
-        "NO_COLOR": "1",
-        # Rung 6: the SDK that @macos_sdk selects. The tinycc tool step calls clang with no -isysroot.
-        "SDKROOT": str(sdk_path(args.sysroot_info)),
-        "SOURCE_DATE_EPOCH": "0",
-        "ZERO_AR_DATE": "1",
-    }
+    env = build_env(scratch, tools, cache, str(sdk_path(args.sysroot_info)))
     for name in ("HOME", "TMPDIR"):
         pathlib.Path(env[name]).mkdir(parents=True, exist_ok=True)
     subprocess.run(
