@@ -40,6 +40,8 @@ def jdk_tests(line):
         deps = [":jdklib"],
         data = data,
         env = env,
+        # macOS returns EPERM for a Java connect to loopback when the network is blocked.
+        tags = ["requires-network"],
         size = "medium",
     )
 
@@ -50,6 +52,8 @@ def jdk_tests(line):
         deps = [":jdklib", "//trust/testing:trustlib"],
         data = data,
         env = env,
+        # Same loopback connect as hermetic. macOS denies it when the network is blocked.
+        tags = ["requires-network"],
         size = "medium",
     )
 

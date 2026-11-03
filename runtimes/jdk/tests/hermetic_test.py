@@ -1,5 +1,7 @@
-"""Hermetic proof for the JDK with an empty cacerts. These tests use no network.
+"""Hermetic proof for the JDK with an empty cacerts.
 
+The client dials only the local TLS server.
+On macOS the sandbox returns EPERM for that Java connect, so the test allows network.
 The stock control shows that each assertion can fail. teeth_test.py proves this.
 """
 
